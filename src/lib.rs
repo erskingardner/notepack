@@ -92,36 +92,33 @@ pub use stringtype::StringType;
 
 use varint::{write_tagged_varint, write_varint};
 
-/// Packs a [`Note`] into its compact binary notepack representation.
+/// Packs a [`NoteBuf`] into an existing buffer, appending the binary payload.
 ///
-/// This function serializes a [`Note`] into the raw notepack binary format:
-/// - Adds version (currently `1`) as a varint.
-/// - Encodes fixed-size fields (`id`, `pubkey`, `sig`) as raw bytes.
-/// - Writes variable-length fields (`content`, `tags`) with varint length prefixes.
-/// - Optimizes strings that look like 32-byte hex by storing them in a compressed form.
+/// This is the streaming/zero-alloc encoding API. It appends the notepack binary
+/// directly to the provided buffer, allowing callers to reuse allocations.
 ///
-/// Returns a `Vec<u8>` containing the binary payload, or an [`Error`] if hex decoding fails.
-///
-/// This is the low-level encoding API—most callers will want [`pack_note_to_string`] instead.
+/// Returns the number of bytes written, or an [`Error`] if hex decoding fails.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Hex`] if any hex string field (like `id`, `pubkey`, or `sig`) fails to decode.
+/// Returns [`Error::FromHex`] if any hex string field (like `id`, `pubkey`, or `sig`)
+/// fails to decode.
 ///
 /// # Example
 ///
 /// ```rust
-/// use notepack::{NoteBuf, pack_note};
+/// use notepack::{NoteBuf, pack_note_into};
 ///
 /// let note = NoteBuf::default();
-/// let binary = pack_note(&note).unwrap();
-/// assert!(binary.len() > 0);
+/// let mut buf = Vec::with_capacity(256);
+/// let len = pack_note_into(&note, &mut buf).unwrap();
+/// assert_eq!(len, buf.len());
 /// ```
-pub fn pack_note(note: &NoteBuf) -> Result<Vec<u8>, Error> {
-    let mut buf = Vec::new();
+pub fn pack_note_into(note: &NoteBuf, buf: &mut Vec<u8>) -> Result<usize, Error> {
+    let start_len = buf.len();
 
     // version
-    write_varint(&mut buf, 1);
+    write_varint(buf, 1);
 
     // id
     let id_bytes = hex::decode(&note.id)?;
@@ -135,21 +132,54 @@ pub fn pack_note(note: &NoteBuf) -> Result<Vec<u8>, Error> {
     let sig_bytes = hex::decode(&note.sig)?;
     buf.extend_from_slice(&sig_bytes);
 
-    write_varint(&mut buf, note.created_at);
-    write_varint(&mut buf, note.kind);
-    write_varint(&mut buf, note.content.len() as u64);
+    write_varint(buf, note.created_at);
+    write_varint(buf, note.kind);
+    write_varint(buf, note.content.len() as u64);
     buf.extend_from_slice(note.content.as_bytes());
 
-    write_varint(&mut buf, note.tags.len() as u64);
+    write_varint(buf, note.tags.len() as u64);
 
     for tag in &note.tags {
-        write_varint(&mut buf, tag.len() as u64);
+        write_varint(buf, tag.len() as u64);
 
         for elem in tag {
-            write_string(&mut buf, &elem);
+            write_string(buf, elem.as_str());
         }
     }
 
+    Ok(buf.len() - start_len)
+}
+
+/// Packs a [`NoteBuf`] into its compact binary notepack representation.
+///
+/// This function serializes a [`NoteBuf`] into the raw notepack binary format:
+/// - Adds version (currently `1`) as a varint.
+/// - Encodes fixed-size fields (`id`, `pubkey`, `sig`) as raw bytes.
+/// - Writes variable-length fields (`content`, `tags`) with varint length prefixes.
+/// - Optimizes strings that look like 32-byte hex by storing them in a compressed form.
+///
+/// Returns a `Vec<u8>` containing the binary payload, or an [`Error`] if hex decoding fails.
+///
+/// For buffer reuse, see [`pack_note_into`] which appends to an existing buffer.
+///
+/// # Errors
+///
+/// Returns [`Error::FromHex`] if any hex string field (like `id`, `pubkey`, or `sig`)
+/// fails to decode.
+///
+/// # Example
+///
+/// ```rust
+/// use notepack::{NoteBuf, pack_note};
+///
+/// let note = NoteBuf::default();
+/// let binary = pack_note(&note).unwrap();
+/// assert!(binary.len() > 0);
+/// ```
+pub fn pack_note(note: &NoteBuf) -> Result<Vec<u8>, Error> {
+    // Pre-allocate: version(1) + id(32) + pubkey(32) + sig(64) + overhead
+    let mut buf = Vec::with_capacity(150 + note.content.len());
+    pack_note_into(note, &mut buf)?;
     Ok(buf)
 }
 
@@ -193,7 +223,7 @@ fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, Error> {
     }
 
     // Reject odd-length hex strings
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return Err(Error::FromHex);
     }
 

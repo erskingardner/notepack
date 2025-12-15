@@ -24,7 +24,10 @@ pub struct NoteBuf {
     pub sig: String,
 }
 
-/// a Nostr note in notepack format
+/// A Nostr note in notepack format (zero-copy, borrowed).
+///
+/// This struct holds references into the original notepack binary data.
+/// Use [`Note::to_owned`] to convert to a [`NoteBuf`] if you need owned data.
 #[derive(Debug, Clone)]
 pub struct Note<'a> {
     /// 32-bytes sha256 of the the serialized event data
@@ -42,6 +45,55 @@ pub struct Note<'a> {
     pub kind: u64,
     /// Tags
     pub tags: Tags<'a>,
+}
+
+impl<'a> Note<'a> {
+    /// Convert this borrowed [`Note`] to an owned [`NoteBuf`].
+    ///
+    /// This iterates through all tags and converts them to strings:
+    /// - Text elements are copied as-is
+    /// - Byte elements are hex-encoded (lowercase)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if tag iteration encounters malformed data (e.g., truncated
+    /// input or invalid UTF-8).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let note = NoteParser::new(&bytes).into_note().unwrap();
+    /// let owned = note.to_owned().unwrap();
+    /// assert_eq!(owned.content, "hi");
+    /// ```
+    pub fn to_owned(&self) -> Result<NoteBuf, Error> {
+        let mut tags_vec: Vec<Vec<String>> = Vec::with_capacity(self.tags.len() as usize);
+        let mut tags = self.tags.clone();
+
+        while let Some(mut elems) = tags.next_tag()? {
+            let mut tag_vec: Vec<String> = Vec::with_capacity(elems.remaining() as usize);
+            for elem in &mut elems {
+                match elem? {
+                    StringType::Str(s) => tag_vec.push(s.to_string()),
+                    StringType::Bytes(bs) => tag_vec.push(hex::encode(bs)),
+                }
+            }
+            tags_vec.push(tag_vec);
+        }
+
+        Ok(NoteBuf {
+            id: hex::encode(self.id),
+            pubkey: hex::encode(self.pubkey),
+            sig: hex::encode(self.sig),
+            content: self.content.to_string(),
+            created_at: self.created_at,
+            kind: self.kind,
+            tags: tags_vec,
+        })
+    }
 }
 
 impl<'a> Serialize for Note<'a> {
