@@ -283,7 +283,11 @@ impl<'a> Iterator for NoteParser<'a> {
 ///
 /// Returns [`Error::Truncated`] if fewer than `len` bytes remain.
 fn read_bytes<'a>(len: u64, input: &mut &'a [u8]) -> Result<&'a [u8], Error> {
-    let (head, tail) = input.split_at(len as usize);
+    let len = len as usize;
+    if len > input.len() {
+        return Err(Error::Truncated);
+    }
+    let (head, tail) = input.split_at(len);
     *input = tail;
     Ok(head)
 }
