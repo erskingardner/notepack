@@ -20,4 +20,3 @@ pub fn format_speedup(json_ns: u128, np_ns: u128) -> String {
         format!("{:>5.1}x slower", 1.0 / ratio)
     }
 }
-

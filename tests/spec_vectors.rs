@@ -61,7 +61,9 @@ fn spec_encoding_matches_base64_vector() {
 #[test]
 fn spec_decoding_binary_vector() {
     let bytes = hex_simd::decode_to_vec(SPEC_BINARY_HEX).expect("valid hex");
-    let note = NoteParser::new(&bytes).into_note().expect("parsing should succeed");
+    let note = NoteParser::new(&bytes)
+        .into_note()
+        .expect("parsing should succeed");
 
     // Verify fixed fields
     assert_eq!(note.id, &[0x00; 32]);
@@ -78,7 +80,9 @@ fn spec_decoding_binary_vector() {
 #[test]
 fn spec_decoding_base64_vector() {
     let bytes = NoteParser::decode(SPEC_B64).expect("decoding should succeed");
-    let note = NoteParser::new(&bytes).into_note().expect("parsing should succeed");
+    let note = NoteParser::new(&bytes)
+        .into_note()
+        .expect("parsing should succeed");
 
     assert_eq!(note.content, "hello");
     assert_eq!(note.kind, 0);
@@ -93,7 +97,9 @@ fn spec_roundtrip_preserves_all_fields() {
     let bytes = pack_note(&original).expect("encoding should succeed");
 
     // Decode
-    let parsed = NoteParser::new(&bytes).into_note().expect("parsing should succeed");
+    let parsed = NoteParser::new(&bytes)
+        .into_note()
+        .expect("parsing should succeed");
     let recovered = parsed.to_owned().expect("to_owned should succeed");
 
     assert_eq!(original.id, recovered.id);
@@ -108,7 +114,9 @@ fn spec_roundtrip_preserves_all_fields() {
 #[test]
 fn spec_tag_iteration_yields_correct_values() {
     let bytes = hex_simd::decode_to_vec(SPEC_BINARY_HEX).expect("valid hex");
-    let note = NoteParser::new(&bytes).into_note().expect("parsing should succeed");
+    let note = NoteParser::new(&bytes)
+        .into_note()
+        .expect("parsing should succeed");
 
     let mut tags = note.tags.clone();
 
@@ -235,6 +243,8 @@ fn spec_tagged_varint_tag_elements() {
     let hex = hex_simd::encode_to_string(&bytes, hex_simd::AsciiCase::Lower);
 
     // 0x41 appears for the 32-byte hex values
-    assert!(hex.contains("41"), "should contain tagged varint 0x41 for 32-byte hex");
+    assert!(
+        hex.contains("41"),
+        "should contain tagged varint 0x41 for 32-byte hex"
+    );
 }
-

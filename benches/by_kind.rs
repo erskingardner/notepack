@@ -11,7 +11,7 @@
 //!   cargo bench --bench by_kind -- "encode"
 //!   cargo bench --bench by_kind -- "json"
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use notepack::{NoteBuf, NoteParser, StringType, pack_note, pack_note_to_string};
 use std::hint::black_box;
 
@@ -197,9 +197,7 @@ fn bench_notepack_decode(c: &mut Criterion) {
             |b, corpus| {
                 b.iter(|| {
                     for bytes in &corpus.notepack_bytes {
-                        let note = NoteParser::new(black_box(bytes))
-                            .into_note()
-                            .expect("ok");
+                        let note = NoteParser::new(black_box(bytes)).into_note().expect("ok");
                         black_box(note);
                     }
                 });
@@ -223,9 +221,7 @@ fn bench_notepack_decode_full(c: &mut Criterion) {
                 b.iter(|| {
                     let mut acc = 0usize;
                     for bytes in &corpus.notepack_bytes {
-                        let note = NoteParser::new(black_box(bytes))
-                            .into_note()
-                            .expect("ok");
+                        let note = NoteParser::new(black_box(bytes)).into_note().expect("ok");
 
                         // Drain all tags to force full parsing
                         let mut tags = note.tags;
@@ -422,21 +418,30 @@ fn print_comparison_table(_c: &mut Criterion) {
     // Print table
     eprintln!("\n");
     eprintln!("╔══════════════════════════════════════════════════════════════════╗");
-    eprintln!("║              NOTEPACK vs JSON COMPARISON ({:4} events)           ║", all_notes.len());
+    eprintln!(
+        "║              NOTEPACK vs JSON COMPARISON ({:4} events)           ║",
+        all_notes.len()
+    );
     eprintln!("╠══════════════════════════════════════════════════════════════════╣");
     eprintln!("║  Operation          │    JSON     │  notepack   │   Speedup     ║");
     eprintln!("╠══════════════════════════════════════════════════════════════════╣");
     eprintln!(
         "║  Encode             │ {:>7} ns  │ {:>7} ns  │  {} ║",
-        json_encode_ns, np_encode_ns, format_speedup(json_encode_ns, np_encode_ns)
+        json_encode_ns,
+        np_encode_ns,
+        format_speedup(json_encode_ns, np_encode_ns)
     );
     eprintln!(
         "║  Decode             │ {:>7} ns  │ {:>7} ns  │  {} ║",
-        json_decode_ns, np_decode_ns, format_speedup(json_decode_ns, np_decode_ns)
+        json_decode_ns,
+        np_decode_ns,
+        format_speedup(json_decode_ns, np_decode_ns)
     );
     eprintln!(
         "║  Decode (full)      │ {:>7} ns  │ {:>7} ns  │  {} ║",
-        json_decode_ns, np_decode_full_ns, format_speedup(json_decode_ns, np_decode_full_ns)
+        json_decode_ns,
+        np_decode_full_ns,
+        format_speedup(json_decode_ns, np_decode_full_ns)
     );
     eprintln!("╠══════════════════════════════════════════════════════════════════╣");
     eprintln!(
@@ -469,4 +474,3 @@ criterion_group!(
 );
 
 criterion_main!(benches);
-

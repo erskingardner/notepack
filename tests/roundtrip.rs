@@ -9,13 +9,18 @@ use notepack::{NoteBuf, NoteParser, pack_note, pack_note_to_string};
 fn assert_roundtrip(original: &NoteBuf) {
     // Binary roundtrip
     let bytes = pack_note(original).expect("encoding should succeed");
-    let parsed = NoteParser::new(&bytes).into_note().expect("parsing should succeed");
+    let parsed = NoteParser::new(&bytes)
+        .into_note()
+        .expect("parsing should succeed");
     let recovered = parsed.to_owned().expect("to_owned should succeed");
 
     assert_eq!(original.id, recovered.id, "id mismatch");
     assert_eq!(original.pubkey, recovered.pubkey, "pubkey mismatch");
     assert_eq!(original.sig, recovered.sig, "sig mismatch");
-    assert_eq!(original.created_at, recovered.created_at, "created_at mismatch");
+    assert_eq!(
+        original.created_at, recovered.created_at,
+        "created_at mismatch"
+    );
     assert_eq!(original.kind, recovered.kind, "kind mismatch");
     assert_eq!(original.content, recovered.content, "content mismatch");
     assert_eq!(original.tags, recovered.tags, "tags mismatch");
@@ -27,7 +32,9 @@ fn assert_b64_roundtrip(original: &NoteBuf) {
     assert!(encoded.starts_with("notepack_"));
 
     let bytes = NoteParser::decode(&encoded).expect("decoding should succeed");
-    let parsed = NoteParser::new(&bytes).into_note().expect("parsing should succeed");
+    let parsed = NoteParser::new(&bytes)
+        .into_note()
+        .expect("parsing should succeed");
     let recovered = parsed.to_owned().expect("to_owned should succeed");
 
     assert_eq!(original.id, recovered.id);
@@ -263,9 +270,10 @@ fn b64_roundtrip_with_content() {
 #[test]
 fn b64_roundtrip_with_tags() {
     let mut note = minimal_note();
-    note.tags = vec![
-        vec!["e".into(), "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".into()],
-    ];
+    note.tags = vec![vec![
+        "e".into(),
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".into(),
+    ]];
     assert_b64_roundtrip(&note);
 }
 
@@ -321,7 +329,12 @@ fn roundtrip_contact_list_style_note() {
     note.tags = (0..50)
         .map(|i| {
             let pubkey = format!("{:0>64x}", i);
-            vec!["p".into(), pubkey, format!("wss://relay{}.example.com", i % 5), "".into()]
+            vec![
+                "p".into(),
+                pubkey,
+                format!("wss://relay{}.example.com", i % 5),
+                "".into(),
+            ]
         })
         .collect();
 
@@ -335,7 +348,11 @@ fn roundtrip_replaceable_event() {
     note.kind = 10002;
     note.tags = vec![
         vec!["r".into(), "wss://relay1.example.com".into(), "read".into()],
-        vec!["r".into(), "wss://relay2.example.com".into(), "write".into()],
+        vec![
+            "r".into(),
+            "wss://relay2.example.com".into(),
+            "write".into(),
+        ],
         vec!["r".into(), "wss://relay3.example.com".into()],
     ];
 
@@ -413,4 +430,3 @@ fn roundtrip_tag_with_uppercase_hex() {
     // The uppercase hex should be preserved as-is
     assert_eq!(recovered.tags[0][1], "AABBCCDD");
 }
-

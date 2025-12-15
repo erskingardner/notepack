@@ -106,7 +106,9 @@ impl<'a> Note<'a> {
             for elem in &mut elems {
                 match elem? {
                     StringType::Str(s) => tag_vec.push(s.to_string()),
-                    StringType::Bytes(bs) => tag_vec.push(hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower)),
+                    StringType::Bytes(bs) => {
+                        tag_vec.push(hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower))
+                    }
                 }
             }
             tags_vec.push(tag_vec);
@@ -133,8 +135,14 @@ impl<'a> Serialize for Note<'a> {
         let mut st = serializer.serialize_struct("Note", 7)?;
 
         // Hex-encode fixed-size fields (lowercase).
-        st.serialize_field("id", &hex_simd::encode_to_string(self.id, hex_simd::AsciiCase::Lower))?;
-        st.serialize_field("pubkey", &hex_simd::encode_to_string(self.pubkey, hex_simd::AsciiCase::Lower))?;
+        st.serialize_field(
+            "id",
+            &hex_simd::encode_to_string(self.id, hex_simd::AsciiCase::Lower),
+        )?;
+        st.serialize_field(
+            "pubkey",
+            &hex_simd::encode_to_string(self.pubkey, hex_simd::AsciiCase::Lower),
+        )?;
         st.serialize_field("created_at", &self.created_at)?;
         st.serialize_field("kind", &self.kind)?;
 
@@ -155,7 +163,9 @@ impl<'a> Serialize for Note<'a> {
             {
                 match elem {
                     crate::stringtype::StringType::Str(s) => tag_vec.push(s.to_string()),
-                    crate::stringtype::StringType::Bytes(bs) => tag_vec.push(hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower)),
+                    crate::stringtype::StringType::Bytes(bs) => {
+                        tag_vec.push(hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower))
+                    }
                 }
             }
             tags_json.push(tag_vec);
@@ -163,7 +173,10 @@ impl<'a> Serialize for Note<'a> {
 
         st.serialize_field("tags", &tags_json)?;
         st.serialize_field("content", &self.content)?;
-        st.serialize_field("sig", &hex_simd::encode_to_string(self.sig, hex_simd::AsciiCase::Lower))?;
+        st.serialize_field(
+            "sig",
+            &hex_simd::encode_to_string(self.sig, hex_simd::AsciiCase::Lower),
+        )?;
 
         st.end()
     }
@@ -509,7 +522,10 @@ mod tests {
             for x in &mut t0 {
                 match x? {
                     StringType::Str(s) => out.push(format!("S:{s}")),
-                    StringType::Bytes(bs) => out.push(format!("B:{}", hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower))),
+                    StringType::Bytes(bs) => out.push(format!(
+                        "B:{}",
+                        hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower)
+                    )),
                 }
             }
             assert_eq!(out, &["S:p", "B:aabb", "S:hello"]);
@@ -606,9 +622,11 @@ mod tests {
 
     #[test]
     fn tag_elems_remaining_decrements() -> Result<(), Error> {
-        let block = build_tags_block(&[
-            vec![ElemSpec::Str("a"), ElemSpec::Str("b"), ElemSpec::Str("c")],
-        ]);
+        let block = build_tags_block(&[vec![
+            ElemSpec::Str("a"),
+            ElemSpec::Str("b"),
+            ElemSpec::Str("c"),
+        ]]);
 
         let mut input = block.as_slice();
         let mut tags = Tags::parse(&mut input)?;
@@ -677,9 +695,18 @@ mod to_owned_tests {
         let note = NoteParser::new(&bytes).into_note().unwrap();
         let owned = note.to_owned().unwrap();
 
-        assert_eq!(owned.id, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        assert_eq!(owned.pubkey, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-        assert_eq!(owned.sig, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        assert_eq!(
+            owned.id,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(
+            owned.pubkey,
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
+        assert_eq!(
+            owned.sig,
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        );
     }
 
     #[test]
@@ -711,11 +738,17 @@ mod to_owned_tests {
 
         // Tag 0: ["e", <hex>]
         assert_eq!(owned.tags[0][0], "e");
-        assert_eq!(owned.tags[0][1], "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+        assert_eq!(
+            owned.tags[0][1],
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        );
 
         // Tag 1: ["p", <hex>]
         assert_eq!(owned.tags[1][0], "p");
-        assert_eq!(owned.tags[1][1], "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+        assert_eq!(
+            owned.tags[1][1],
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        );
 
         // Tag 2: ["t", "test"] - text stays as text
         assert_eq!(owned.tags[2][0], "t");
@@ -819,7 +852,9 @@ mod serialization_tests {
         let json = serde_json::to_string(&note).unwrap();
 
         // id should be lowercase hex
-        assert!(json.contains("\"id\":\"1111111111111111111111111111111111111111111111111111111111111111\""));
+        assert!(json.contains(
+            "\"id\":\"1111111111111111111111111111111111111111111111111111111111111111\""
+        ));
     }
 
     #[test]

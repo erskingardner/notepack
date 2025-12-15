@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use notepack::{NoteBuf, NoteParser, StringType, pack_note, pack_note_to_string};
 use std::hint::black_box;
 
@@ -22,8 +22,7 @@ fn bench_codec(c: &mut Criterion) {
     // One-time fixture setup outside the timer.
     let json_len = CONTACTS_JSON.len() as u64;
 
-    let note_from_json: NoteBuf =
-        serde_json::from_str(CONTACTS_JSON).expect("valid fixture");
+    let note_from_json: NoteBuf = serde_json::from_str(CONTACTS_JSON).expect("valid fixture");
     let notepack_bytes = pack_note(&note_from_json).expect("pack ok");
     let notepack_b64 = pack_note_to_string(&note_from_json).expect("pack to string ok");
 
@@ -227,7 +226,9 @@ fn print_comparison_table(_c: &mut Criterion) {
     // Measure notepack decode (into_note, lazy)
     let start = Instant::now();
     for _ in 0..iterations {
-        let parsed = NoteParser::new(black_box(&notepack_bytes)).into_note().expect("ok");
+        let parsed = NoteParser::new(black_box(&notepack_bytes))
+            .into_note()
+            .expect("ok");
         black_box(parsed);
     }
     let np_decode_ns = start.elapsed().as_nanos() / iterations;
@@ -235,7 +236,9 @@ fn print_comparison_table(_c: &mut Criterion) {
     // Measure notepack decode full (with tag iteration)
     let start = Instant::now();
     for _ in 0..iterations {
-        let parsed = NoteParser::new(black_box(&notepack_bytes)).into_note().expect("ok");
+        let parsed = NoteParser::new(black_box(&notepack_bytes))
+            .into_note()
+            .expect("ok");
         let mut tags = parsed.tags;
         while let Some(mut elems) = tags.next_tag().expect("ok") {
             for item in &mut elems {
@@ -258,15 +261,21 @@ fn print_comparison_table(_c: &mut Criterion) {
     eprintln!("╠══════════════════════════════════════════════════════════════════╣");
     eprintln!(
         "║  Encode             │ {:>7} ns  │ {:>7} ns  │  {} ║",
-        json_encode_ns, np_encode_ns, format_speedup(json_encode_ns, np_encode_ns)
+        json_encode_ns,
+        np_encode_ns,
+        format_speedup(json_encode_ns, np_encode_ns)
     );
     eprintln!(
         "║  Decode             │ {:>7} ns  │ {:>7} ns  │  {} ║",
-        json_decode_ns, np_decode_ns, format_speedup(json_decode_ns, np_decode_ns)
+        json_decode_ns,
+        np_decode_ns,
+        format_speedup(json_decode_ns, np_decode_ns)
     );
     eprintln!(
         "║  Decode (full)      │ {:>7} ns  │ {:>7} ns  │  {} ║",
-        json_decode_ns, np_decode_full_ns, format_speedup(json_decode_ns, np_decode_full_ns)
+        json_decode_ns,
+        np_decode_full_ns,
+        format_speedup(json_decode_ns, np_decode_full_ns)
     );
     eprintln!("╠══════════════════════════════════════════════════════════════════╣");
     eprintln!(

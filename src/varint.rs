@@ -108,7 +108,11 @@ pub fn write_varint_to<W: Write>(w: &mut W, mut n: u64) -> std::io::Result<usize
 ///
 /// Returns the number of bytes written.
 #[inline]
-pub fn write_tagged_varint_to<W: Write>(w: &mut W, value: u64, tagged: bool) -> std::io::Result<usize> {
+pub fn write_tagged_varint_to<W: Write>(
+    w: &mut W,
+    value: u64,
+    tagged: bool,
+) -> std::io::Result<usize> {
     let tagged = value
         .checked_shl(1)
         .expect("value too large for tagged varint")

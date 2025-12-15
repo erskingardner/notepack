@@ -10,7 +10,10 @@ fn main() -> Result<(), Error> {
 
     if let Ok(packed) = NoteParser::decode(buffer.trim()) {
         if output_hex {
-            println!("{}", hex_simd::encode_to_string(&packed, hex_simd::AsciiCase::Lower));
+            println!(
+                "{}",
+                hex_simd::encode_to_string(&packed, hex_simd::AsciiCase::Lower)
+            );
             return Ok(());
         }
 

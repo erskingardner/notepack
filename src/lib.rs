@@ -86,7 +86,7 @@ mod stringtype;
 mod varint;
 
 pub use error::Error;
-pub use note::{Note, NoteBuf, Tags, TagElems};
+pub use note::{Note, NoteBuf, TagElems, Tags};
 pub use parser::{NoteParser, ParsedField, ParserState};
 pub use stringtype::StringType;
 
@@ -475,8 +475,14 @@ mod tests {
     fn pack_note_with_tags() {
         let mut note = minimal_note();
         note.tags = vec![
-            vec!["e".into(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into()],
-            vec!["p".into(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into()],
+            vec![
+                "e".into(),
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            ],
+            vec![
+                "p".into(),
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            ],
         ];
 
         let bytes = pack_note(&note).unwrap();
@@ -692,8 +698,15 @@ mod tests {
     fn roundtrip_with_tags() {
         let mut note = minimal_note();
         note.tags = vec![
-            vec!["e".into(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "wss://relay.example.com".into()],
-            vec!["p".into(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into()],
+            vec![
+                "e".into(),
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                "wss://relay.example.com".into(),
+            ],
+            vec![
+                "p".into(),
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            ],
             vec!["t".into(), "nostr".into()],
         ];
 

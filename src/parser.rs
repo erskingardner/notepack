@@ -1,7 +1,7 @@
-use crate::{Note, Tags};
 use crate::error::Error;
 use crate::stringtype::StringType;
 use crate::varint::{read_tagged_varint, read_varint};
+use crate::{Note, Tags};
 
 /// Represents a parsed field from a notepack‐encoded Nostr note.
 ///
@@ -423,7 +423,6 @@ pub(crate) fn read_string<'a>(input: &mut &'a [u8]) -> Result<StringType<'a>, Er
     })
 }
 
-
 #[cfg(test)]
 mod into_note_tests {
     use super::*;
@@ -492,15 +491,24 @@ mod into_note_tests {
     #[test]
     fn into_note_parses_fixed_fields_and_lazy_tags() -> Result<(), Error> {
         // Arrange
-        let id  = [0x11; 32];
-        let pk  = [0x22; 32];
+        let id = [0x11; 32];
+        let pk = [0x22; 32];
         let sig = [0x33; 64];
 
         // tags: [["p", <aabb>, "hello"], [""]]
         let bytes = build_note_bytes(
-            id, pk, sig, 1_234, 1, "hi",
+            id,
+            pk,
+            sig,
+            1_234,
+            1,
+            "hi",
             &[
-                &[TagElem::S("p"), TagElem::B(&[0xaa, 0xbb]), TagElem::S("hello")],
+                &[
+                    TagElem::S("p"),
+                    TagElem::B(&[0xaa, 0xbb]),
+                    TagElem::S("hello"),
+                ],
                 &[TagElem::S("")],
             ],
         );
@@ -558,12 +566,17 @@ mod into_note_tests {
     #[test]
     fn into_note_tag_drop_realigns_parent_cursor() -> Result<(), Error> {
         // Arrange: tag0 ["a","b","c"] then tag1 ["z"]
-        let id  = [0x44; 32];
-        let pk  = [0x55; 32];
+        let id = [0x44; 32];
+        let pk = [0x55; 32];
         let sig = [0x66; 64];
 
         let bytes = build_note_bytes(
-            id, pk, sig, 999, 42, "x",
+            id,
+            pk,
+            sig,
+            999,
+            42,
+            "x",
             &[
                 &[TagElem::S("a"), TagElem::S("b"), TagElem::S("c")],
                 &[TagElem::S("z")],
@@ -600,24 +613,24 @@ mod into_note_tests {
     #[test]
     fn into_note_succeeds_even_if_later_tag_is_truncated_but_iteration_errors() {
         // Arrange a note where the tag element length claims 10 bytes but we provide 3.
-        let id  = [0x77; 32];
-        let pk  = [0x88; 32];
+        let id = [0x77; 32];
+        let pk = [0x88; 32];
         let sig = [0x99; 64];
 
         // Build the payload manually so we can truncate the last element.
         let mut bytes = Vec::new();
-        write_varint(&mut bytes, 1);                     // version
+        write_varint(&mut bytes, 1); // version
         bytes.extend_from_slice(&id);
         bytes.extend_from_slice(&pk);
         bytes.extend_from_slice(&sig);
-        write_varint(&mut bytes, 7);                     // created_at
-        write_varint(&mut bytes, 1);                     // kind
-        write_varint(&mut bytes, 0);                     // content len
+        write_varint(&mut bytes, 7); // created_at
+        write_varint(&mut bytes, 1); // kind
+        write_varint(&mut bytes, 0); // content len
         // content bytes: none
-        write_varint(&mut bytes, 1);                     // num_tags
-        write_varint(&mut bytes, 1);                     // tag0: 1 elem
-        write_tagged_varint(&mut bytes, 10, false);      // claim 10 bytes (utf8)
-        bytes.extend_from_slice(b"abc");                 // only 3 bytes => truncated
+        write_varint(&mut bytes, 1); // num_tags
+        write_varint(&mut bytes, 1); // tag0: 1 elem
+        write_tagged_varint(&mut bytes, 10, false); // claim 10 bytes (utf8)
+        bytes.extend_from_slice(b"abc"); // only 3 bytes => truncated
 
         // Act: into_note should still succeed (tags are lazy).
         let note = NoteParser::new(&bytes).into_note().expect("note ok");
