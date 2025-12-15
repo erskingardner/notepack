@@ -30,7 +30,7 @@ All multi‑byte integers use **unsigned LEB128 (ULEB128)**. Bit 7 indicates con
 
 ```
 notepack-binary = 
-    version                ; u8 version tag
+    varint(version)        ; format version (currently 1)
   | id[32]                 ; raw 32 bytes
   | pubkey[32]             ; raw 32 bytes
   | sig[64]                ; raw 64 bytes
@@ -41,6 +41,8 @@ notepack-binary =
   | varint(num_tags)
   | repeated num_tags * tag
 ```
+
+> **Note:** The `version` field is encoded as a ULEB128 varint. Version `1` is the current format described in this document. Future versions may add fields or change encoding rules. Decoders SHOULD reject unknown versions.
 
 ### 3.2 Tags
 
@@ -174,11 +176,12 @@ tags       = [
 **Packed binary (hex):**
 
 ```
-000000000000000000000000000000000000000000000000000000000000000011111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222280bc94b406000568656c6c6f0203026541aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2e7773733a2f2f72656c61792e6578616d706c652e636f6d02027041bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+01000000000000000000000000000000000000000000000000000000000000000011111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222280bc94b406000568656c6c6f0203026541aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2e7773733a2f2f72656c61792e6578616d706c652e636f6d02027041bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 ```
 
 Breakdown (annotated):
 
+* `01` → varint(version=1)
 * `00…00` (32B) id
 * `11…11` (32B) pubkey
 * `22…22` (64B) sig
@@ -207,7 +210,7 @@ Tag #2:
 **String form (`notepack_` + Base64 without padding):**
 
 ```
-notepack_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiKAvJS0BgAFaGVsbG8CAwJlQaqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqLndzczovL3JlbGF5LmV4YW1wbGUuY29tAgJwQbu7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7
+notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw
 ```
 
 ---
@@ -265,8 +268,9 @@ read_tagged():
 
 ## 13. Extensibility
 
-* **Reserved:** No version field is present. If the binary layout changes incompatibly, introduce a new string prefix (e.g., `notepack1_`), or define envelope tags at the end guarded by a feature bit in `kind`.
-* **Forward‑compat:** Decoders MUST stop exactly at the end of the payload; there is no trailing‑field discovery mechanism in 0.1.
+* **Version field:** The leading `varint(version)` enables future format changes. Version `1` is the current format. If incompatible changes are needed, the version number will be incremented. Decoders SHOULD reject versions they do not understand.
+* **String prefix:** For major format overhauls, a new string prefix (e.g., `notepack2_`) MAY be introduced alongside the version bump.
+* **Forward‑compat:** Decoders MUST stop exactly at the end of the payload; there is no trailing‑field discovery mechanism in version 1.
 
 ---
 
