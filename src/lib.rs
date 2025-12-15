@@ -282,14 +282,17 @@ pub fn pack_note_to_string(note: &NoteBuf) -> Result<String, Error> {
     Ok(format!("notepack_{}", base64_encode(&bytes)))
 }
 
+/// Encode bytes as Base64 (RFC 4648, no padding).
 fn base64_encode(bs: &[u8]) -> String {
     use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 
     STANDARD_NO_PAD.encode(bs)
 }
 
-/// Only lower cased hex are allowed, otherwise encoding
-/// wouldn't round-trip
+/// Decode a lowercase hex string to bytes.
+///
+/// Only lowercase hex is accepted to ensure round-trip encoding works correctly.
+/// Uppercase hex or odd-length strings return [`Error::FromHex`].
 fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, Error> {
     // Reject uppercase hex
     if input.chars().any(|c| c.is_ascii_uppercase()) {
@@ -304,8 +307,11 @@ fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, Error> {
     Ok(hex_simd::decode_to_vec(input)?)
 }
 
+/// Write a tag element string to a buffer.
+///
+/// If the string is valid lowercase hex, it's compacted to raw bytes (tagged=true).
+/// Otherwise, it's written as UTF-8 text (tagged=false).
 fn write_string(buf: &mut Vec<u8>, string: &str) {
-    // we check to see if the entire string is 32-byte-hex
     if string.is_empty() {
         write_tagged_varint(buf, 0, false);
         return;
@@ -320,6 +326,10 @@ fn write_string(buf: &mut Vec<u8>, string: &str) {
     }
 }
 
+/// Write a tag element string to a [`Write`] implementor.
+///
+/// Same compaction logic as [`write_string`]: hex strings become raw bytes.
+/// Returns the total number of bytes written.
 fn write_string_to<W: Write>(w: &mut W, string: &str) -> std::io::Result<usize> {
     if string.is_empty() {
         return write_tagged_varint_to(w, 0, false);

@@ -5,22 +5,50 @@ use crate::varint::{read_tagged_varint, read_varint};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
+/// An owned Nostr note ready for encoding to notepack format.
+///
+/// This struct represents a Nostr event with all fields owned as `String` or `Vec`.
+/// It can be serialized to/from JSON via serde, and packed into the compact
+/// notepack binary format using [`pack_note`](crate::pack_note) or related functions.
+///
+/// # Fields
+///
+/// All hex-encoded fields (`id`, `pubkey`, `sig`) must use **lowercase** hex for
+/// round-trip encoding to work correctly.
+///
+/// # Example
+///
+/// ```rust
+/// use notepack::{NoteBuf, pack_note_to_string};
+///
+/// let note = NoteBuf {
+///     id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+///     pubkey: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+///     created_at: 1700000000,
+///     kind: 1,
+///     tags: vec![vec!["p".into(), "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into()]],
+///     content: "Hello, Nostr!".into(),
+///     sig: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into(),
+/// };
+///
+/// let packed = pack_note_to_string(&note).unwrap();
+/// assert!(packed.starts_with("notepack_"));
+/// ```
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct NoteBuf {
-    /// 32-bytes sha256 of the the serialized event data
+    /// 32-byte SHA-256 hash of the serialized event data (64 hex chars, lowercase).
     pub id: String,
-    /// 32-bytes hex-encoded public key of the event creator
+    /// 32-byte secp256k1 public key of the event creator (64 hex chars, lowercase).
     pub pubkey: String,
-    /// unix timestamp in seconds
+    /// Unix timestamp in seconds when the event was created.
     pub created_at: u64,
-    /// integer
-    /// 0: NostrEvent
+    /// Event kind as defined by Nostr NIPs (e.g., 1 for text notes).
     pub kind: u64,
-    /// Tags
+    /// Array of tags, where each tag is an array of strings.
     pub tags: Vec<Vec<String>>,
-    /// arbitrary string
+    /// Arbitrary string content of the event.
     pub content: String,
-    /// 64-bytes signature of the sha256 hash of the serialized event data, which is the same as the "id" field
+    /// 64-byte Schnorr signature of the event ID (128 hex chars, lowercase).
     pub sig: String,
 }
 
@@ -143,7 +171,7 @@ impl<'a> Serialize for Note<'a> {
 
 /// A **lazy view** over tags in a packed [`Note`].
 ///
-/// This is returned by [`NoteParser::into_note()`] or [`Tags::parse`].
+/// This is returned by [`NoteParser::into_note()`](crate::NoteParser::into_note) or [`Tags::parse`].
 /// It yields [`TagElems`] iterators—one for each tag block—without pre-scanning
 /// or allocating. The underlying data is parsed lazily as you go.
 ///
@@ -220,11 +248,31 @@ pub struct TagElems<'a, 'p> {
 }
 
 impl<'a> Tags<'a> {
-    /// Parse the tags block at the current cursor.
+    /// Parse the tags block from a binary notepack cursor.
     ///
-    /// `input` must point to the varint `num_tags` (the start of the tags block).
-    /// On success, this consumes that varint and returns a cursor positioned at the
-    /// first tag’s `num_elems`.
+    /// This reads the `num_tags` varint from `input` and returns a lazy [`Tags`]
+    /// iterator positioned at the first tag's element count.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Mutable slice reference pointing to the tags block start
+    ///   (the `num_tags` varint). The slice is advanced past the varint on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::VarintUnterminated`](crate::Error::VarintUnterminated) or
+    /// [`Error::VarintOverflow`](crate::Error::VarintOverflow) if the varint is malformed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let note = NoteParser::new(&bytes).into_note().unwrap();
+    /// // Tags are lazily parsed; check the count
+    /// println!("tag count: {}", note.tags.len());
+    /// ```
     pub fn parse(input: &mut &'a [u8]) -> Result<Self, Error> {
         let num_tags = read_varint(input)?;
         Ok(Self {
@@ -233,21 +281,51 @@ impl<'a> Tags<'a> {
         })
     }
 
+    /// Returns the number of tags remaining to iterate.
+    ///
+    /// This count decreases as you call [`next_tag`](Tags::next_tag).
     #[inline]
     pub fn len(&self) -> u64 {
         self.remaining
     }
 
+    /// Returns `true` if there are no remaining tags to iterate.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.remaining == 0
     }
 
-    /// Lazily advance to the next tag and return an iterator over its elements.
+    /// Advance to the next tag and return an iterator over its elements.
     ///
-    /// This reads only the tag’s `num_elems` varint; element payloads are consumed
-    /// by the returned `TagElems`. If you drop `TagElems` early, it will fast‑forward
-    /// the remaining elements so the parent cursor lands at the next tag.
+    /// Returns `Ok(None)` when all tags have been consumed. Each call reads
+    /// only the tag's `num_elems` varint; element payloads are parsed lazily
+    /// by the returned [`TagElems`] iterator.
+    ///
+    /// # Fast-Forward on Drop
+    ///
+    /// If you drop the [`TagElems`] early (without consuming all elements),
+    /// it will automatically fast-forward past the remaining elements so
+    /// the parent [`Tags`] cursor stays aligned on the next tag.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the `num_elems` varint fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::{NoteParser, StringType};
+    ///
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let note = NoteParser::new(&bytes).into_note().unwrap();
+    /// let mut tags = note.tags.clone();
+    ///
+    /// while let Some(mut elems) = tags.next_tag().unwrap() {
+    ///     for elem in &mut elems {
+    ///         println!("{:?}", elem.unwrap());
+    ///     }
+    /// }
+    /// ```
     pub fn next_tag<'p>(&'p mut self) -> Result<Option<TagElems<'a, 'p>>, Error> {
         if self.remaining == 0 {
             return Ok(None);
@@ -263,13 +341,53 @@ impl<'a> Tags<'a> {
 }
 
 impl<'a, 'p> TagElems<'a, 'p> {
+    /// Returns the number of elements remaining in this tag.
+    ///
+    /// This count decreases as you iterate through elements.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let note = NoteParser::new(&bytes).into_note().unwrap();
+    /// let mut tags = note.tags.clone();
+    ///
+    /// if let Some(elems) = tags.next_tag().unwrap() {
+    ///     assert_eq!(elems.remaining(), 2); // This tag has 2 elements
+    /// }
+    /// ```
     #[inline]
     pub fn remaining(&self) -> u64 {
         self.remaining
     }
 
-    /// Explicitly finish (skip any remaining elements).
-    /// Prefer this if you want errors surfaced instead of silent best‑effort in Drop.
+    /// Explicitly consume all remaining elements, returning any errors encountered.
+    ///
+    /// Call this instead of dropping the iterator if you need to detect truncation
+    /// or malformed data in elements you're not reading. The [`Drop`] implementation
+    /// performs a best-effort fast-forward but silently ignores errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Truncated`](crate::Error::Truncated) if an element claims a
+    /// length that exceeds the remaining data, or other errors if varints are malformed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let note = NoteParser::new(&bytes).into_note().unwrap();
+    /// let mut tags = note.tags.clone();
+    ///
+    /// if let Some(elems) = tags.next_tag().unwrap() {
+    ///     // Skip all elements but surface any errors
+    ///     elems.finish().expect("tag elements should be valid");
+    /// }
+    /// ```
     pub fn finish(mut self) -> Result<(), Error> {
         while self.remaining > 0 {
             let (len, _is_bytes) = read_tagged_varint(self.cursor)?;

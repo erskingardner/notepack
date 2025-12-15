@@ -72,22 +72,54 @@ pub struct NoteParser<'a> {
     elems_remaining: u64,
 }
 
-/// Internal parser state machine.
+/// State machine for the [`NoteParser`] streaming parser.
 ///
-/// Parsing transitions linearly (Start → AfterVersion → … → Done).
-/// Once in [`ParserState::Errored`] or [`ParserState::Done`], the parser ha
+/// The parser transitions linearly through states as it reads each field:
+///
+/// ```text
+/// Start → AfterVersion → AfterId → AfterPubkey → AfterSig
+///       → AfterCreatedAt → AfterKind → AfterContent → ReadingTags → Done
+/// ```
+///
+/// If an error occurs at any point, the state transitions to [`ParserState::Errored`]
+/// and the parser halts (subsequent calls to `next()` return `None`).
+///
+/// # Example
+///
+/// ```rust
+/// use notepack::{NoteParser, ParserState};
+///
+/// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+/// let mut parser = NoteParser::new(&bytes);
+///
+/// // Consume all fields
+/// while parser.next().is_some() {}
+///
+/// assert_eq!(parser.current_state(), ParserState::Done);
+/// ```
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ParserState {
+    /// Initial state before any parsing has occurred.
     Start,
+    /// After reading the version field.
     AfterVersion,
+    /// After reading the 32-byte event ID.
     AfterId,
+    /// After reading the 32-byte public key.
     AfterPubkey,
+    /// After reading the 64-byte signature.
     AfterSig,
+    /// After reading the `created_at` timestamp.
     AfterCreatedAt,
+    /// After reading the event kind.
     AfterKind,
+    /// After reading the content string.
     AfterContent,
+    /// Currently reading tags (may yield multiple [`ParsedField`] items).
     ReadingTags,
+    /// Parsing completed successfully.
     Done,
+    /// An error occurred; no more fields will be yielded.
     Errored,
 }
 
@@ -99,7 +131,28 @@ impl ParserState {
 }
 
 impl<'a> NoteParser<'a> {
-    /// Create a new [`NoteParser`] over a binary notepack slice.
+    /// Create a new streaming parser over binary notepack data.
+    ///
+    /// The parser starts in the [`ParserState::Start`] state and yields
+    /// [`ParsedField`] items as you iterate. The input data is borrowed
+    /// for the lifetime `'a`, enabling zero-copy access to strings and bytes.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::{NoteParser, ParsedField};
+    ///
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let parser = NoteParser::new(&bytes);
+    ///
+    /// for field in parser {
+    ///     match field.unwrap() {
+    ///         ParsedField::Kind(k) => println!("kind: {k}"),
+    ///         ParsedField::Content(c) => println!("content: {c}"),
+    ///         _ => {}
+    ///     }
+    /// }
+    /// ```
     pub fn new(data: &'a [u8]) -> Self {
         Self {
             data,
@@ -109,17 +162,31 @@ impl<'a> NoteParser<'a> {
         }
     }
 
-    /// Parse a fully-borrowed `Note<'a>` from the current cursor.
+    /// Parse the notepack data into a zero-copy [`Note`] struct.
     ///
-    /// This is zero-copy for id/pubkey/sig/content; `tags` is returned as a lazy
-    /// cursor (`Tags<'a>`) over the tags block. It does **not** iterate or validate
-    /// the entire tags section up-front.
+    /// This method consumes the parser and returns a fully-parsed [`Note`]
+    /// with borrowed slices pointing into the original data. The `id`, `pubkey`,
+    /// `sig`, and `content` fields are zero-copy references.
     ///
-    /// Typical use:
-    /// ```
+    /// The `tags` field is a lazy [`Tags`](crate::Tags) cursor that does **not**
+    /// iterate or validate the tags section up-front—errors in tag data will
+    /// surface when you iterate through them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the fixed header fields (version, id, pubkey, sig,
+    /// timestamps, content) are malformed or truncated.
+    ///
+    /// # Example
+    ///
+    /// ```rust
     /// use notepack::NoteParser;
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").expect("ok");
-    /// let note = NoteParser::new(&bytes).into_note().expect("ok");
+    ///
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let note = NoteParser::new(&bytes).into_note().unwrap();
+    ///
+    /// assert_eq!(note.kind, 1);
+    /// assert_eq!(note.content, "hi");
     /// ```
     pub fn into_note(mut self) -> Result<Note<'a>, Error> {
         // version (currently not stored)
@@ -162,8 +229,32 @@ impl<'a> NoteParser<'a> {
 
     /// Decode a `notepack_...` Base64 string into raw bytes.
     ///
-    /// Strips the `"notepack_"` prefix and base64‑decodes the remainder.
-    /// Returns [`Error::InvalidPrefix`] if the string does not start with
+    /// This is typically the first step when parsing a notepack string:
+    /// decode to bytes, then pass those bytes to [`NoteParser::new`] or
+    /// [`NoteParser::into_note`].
+    ///
+    /// The input must start with the `notepack_` prefix, followed by
+    /// Base64-encoded data (RFC 4648, no padding).
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidPrefix`](crate::Error::InvalidPrefix) if the string
+    ///   doesn't start with `notepack_`
+    /// - [`Error::Decode`](crate::Error::Decode) if the Base64 is invalid
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// // Decode a notepack string to raw bytes
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// assert!(bytes.len() > 0);
+    ///
+    /// // Then parse the bytes
+    /// let note = NoteParser::new(&bytes).into_note().unwrap();
+    /// assert_eq!(note.content, "hi");
+    /// ```
     pub fn decode(notepack: &'a str) -> Result<Vec<u8>, Error> {
         if let Some(b64) = notepack.strip_prefix("notepack_") {
             Ok(base64_decode(b64)?)
@@ -172,7 +263,24 @@ impl<'a> NoteParser<'a> {
         }
     }
 
-    /// Return the current [`ParserState`] (mainly for debugging or inspection).
+    /// Returns the current parser state.
+    ///
+    /// Useful for debugging or inspecting how far parsing has progressed.
+    /// The parser transitions through states linearly from [`ParserState::Start`]
+    /// to [`ParserState::Done`], or to [`ParserState::Errored`] if an error occurs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::{NoteParser, ParserState};
+    ///
+    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let mut parser = NoteParser::new(&bytes);
+    ///
+    /// assert_eq!(parser.current_state(), ParserState::Start);
+    /// parser.next(); // Parse version
+    /// assert_eq!(parser.current_state(), ParserState::AfterVersion);
+    /// ```
     pub fn current_state(&self) -> ParserState {
         self.state
     }

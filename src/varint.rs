@@ -1,6 +1,15 @@
+//! LEB128-style variable-length integer encoding.
+//!
+//! This module provides functions for reading and writing varints in the
+//! notepack binary format. Values are encoded using 7 bits per byte, with
+//! the high bit indicating continuation.
+
 use crate::Error;
 use std::io::Write;
 
+/// Encode a `u64` as an LEB128 varint, appending bytes to `buf`.
+///
+/// Returns the number of bytes written (1–10 depending on magnitude).
 #[inline]
 pub fn write_varint(buf: &mut Vec<u8>, mut n: u64) -> usize {
     let mut len = 0;
@@ -19,6 +28,12 @@ pub fn write_varint(buf: &mut Vec<u8>, mut n: u64) -> usize {
     len
 }
 
+/// Decode an LEB128 varint from `input`, advancing the slice past the consumed bytes.
+///
+/// # Errors
+///
+/// - [`Error::VarintOverflow`] if the varint exceeds 64 bits.
+/// - [`Error::VarintUnterminated`] if the input ends mid-varint.
 #[inline]
 pub fn read_varint(input: &mut &[u8]) -> Result<u64, Error> {
     let mut n = 0u64;
@@ -42,12 +57,23 @@ pub fn read_varint(input: &mut &[u8]) -> Result<u64, Error> {
     Err(Error::VarintUnterminated)
 }
 
+/// Decode a tagged varint: the low bit indicates type, upper bits hold the value.
+///
+/// Returns `(value, is_bytes)` where `is_bytes` is `true` if the tag bit was set.
+/// Used for tag element strings to distinguish UTF-8 text from raw bytes.
 #[inline]
 pub fn read_tagged_varint(input: &mut &[u8]) -> Result<(u64, bool), Error> {
     let raw = read_varint(input)?;
     Ok((raw >> 1, (raw & 1) != 0))
 }
 
+/// Encode a tagged varint: shifts `value` left by 1 and sets the low bit if `tagged`.
+///
+/// Returns the number of bytes written.
+///
+/// # Panics
+///
+/// Panics if `value` is too large to shift left (i.e., `value >= 2^63`).
 #[inline]
 pub fn write_tagged_varint(buf: &mut Vec<u8>, value: u64, tagged: bool) -> usize {
     let tagged = value
