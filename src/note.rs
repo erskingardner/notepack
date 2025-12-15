@@ -388,7 +388,7 @@ mod tests {
         {
             let mut t0 = tags.next_tag()?.expect("tag0");
             let mut out = Vec::new();
-            while let Some(x) = t0.next() {
+            for x in &mut t0 {
                 match x? {
                     StringType::Str(s) => out.push(format!("S:{s}")),
                     StringType::Bytes(bs) => out.push(format!("B:{}", hex::encode(bs))),
