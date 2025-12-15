@@ -591,4 +591,309 @@ mod tests {
             other => panic!("unexpected error: {other:?}"),
         }
     }
+
+    #[test]
+    fn tags_empty() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 0); // zero tags
+
+        let mut input = buf.as_slice();
+        let mut tags = Tags::parse(&mut input).expect("parse ok");
+        assert_eq!(tags.len(), 0);
+        assert!(tags.is_empty());
+        assert!(tags.next_tag().unwrap().is_none());
+    }
+
+    #[test]
+    fn tag_elems_remaining_decrements() -> Result<(), Error> {
+        let block = build_tags_block(&[
+            vec![ElemSpec::Str("a"), ElemSpec::Str("b"), ElemSpec::Str("c")],
+        ]);
+
+        let mut input = block.as_slice();
+        let mut tags = Tags::parse(&mut input)?;
+        let mut elems = tags.next_tag()?.unwrap();
+
+        assert_eq!(elems.remaining(), 3);
+        elems.next();
+        assert_eq!(elems.remaining(), 2);
+        elems.next();
+        assert_eq!(elems.remaining(), 1);
+        elems.next();
+        assert_eq!(elems.remaining(), 0);
+        assert!(elems.next().is_none());
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod to_owned_tests {
+    use crate::NoteParser;
+
+    fn make_test_note_bytes() -> Vec<u8> {
+        use crate::varint::{write_tagged_varint, write_varint};
+
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0xaa; 32]); // id
+        buf.extend_from_slice(&[0xbb; 32]); // pubkey
+        buf.extend_from_slice(&[0xcc; 64]); // sig
+        write_varint(&mut buf, 1720000000); // created_at
+        write_varint(&mut buf, 1); // kind
+        write_varint(&mut buf, 12); // content len
+        buf.extend_from_slice(b"Hello, Nostr"); // content
+
+        // Tags: [["e", <32-byte hex>], ["p", <32-byte hex>], ["t", "test"]]
+        write_varint(&mut buf, 3); // num_tags
+
+        // Tag 0: ["e", <hex>]
+        write_varint(&mut buf, 2);
+        write_tagged_varint(&mut buf, 1, false);
+        buf.push(b'e');
+        write_tagged_varint(&mut buf, 32, true);
+        buf.extend_from_slice(&[0xdd; 32]);
+
+        // Tag 1: ["p", <hex>]
+        write_varint(&mut buf, 2);
+        write_tagged_varint(&mut buf, 1, false);
+        buf.push(b'p');
+        write_tagged_varint(&mut buf, 32, true);
+        buf.extend_from_slice(&[0xee; 32]);
+
+        // Tag 2: ["t", "test"]
+        write_varint(&mut buf, 2);
+        write_tagged_varint(&mut buf, 1, false);
+        buf.push(b't');
+        write_tagged_varint(&mut buf, 4, false);
+        buf.extend_from_slice(b"test");
+
+        buf
+    }
+
+    #[test]
+    fn to_owned_converts_id_pubkey_sig_to_hex() {
+        let bytes = make_test_note_bytes();
+        let note = NoteParser::new(&bytes).into_note().unwrap();
+        let owned = note.to_owned().unwrap();
+
+        assert_eq!(owned.id, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(owned.pubkey, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        assert_eq!(owned.sig, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    }
+
+    #[test]
+    fn to_owned_preserves_content() {
+        let bytes = make_test_note_bytes();
+        let note = NoteParser::new(&bytes).into_note().unwrap();
+        let owned = note.to_owned().unwrap();
+
+        assert_eq!(owned.content, "Hello, Nostr");
+    }
+
+    #[test]
+    fn to_owned_preserves_timestamps_and_kind() {
+        let bytes = make_test_note_bytes();
+        let note = NoteParser::new(&bytes).into_note().unwrap();
+        let owned = note.to_owned().unwrap();
+
+        assert_eq!(owned.created_at, 1720000000);
+        assert_eq!(owned.kind, 1);
+    }
+
+    #[test]
+    fn to_owned_converts_bytes_tags_to_hex() {
+        let bytes = make_test_note_bytes();
+        let note = NoteParser::new(&bytes).into_note().unwrap();
+        let owned = note.to_owned().unwrap();
+
+        assert_eq!(owned.tags.len(), 3);
+
+        // Tag 0: ["e", <hex>]
+        assert_eq!(owned.tags[0][0], "e");
+        assert_eq!(owned.tags[0][1], "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+
+        // Tag 1: ["p", <hex>]
+        assert_eq!(owned.tags[1][0], "p");
+        assert_eq!(owned.tags[1][1], "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+
+        // Tag 2: ["t", "test"] - text stays as text
+        assert_eq!(owned.tags[2][0], "t");
+        assert_eq!(owned.tags[2][1], "test");
+    }
+
+    #[test]
+    fn to_owned_empty_tags() {
+        use crate::varint::write_varint;
+
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 32]); // id
+        buf.extend_from_slice(&[0x11; 32]); // pubkey
+        buf.extend_from_slice(&[0x22; 64]); // sig
+        write_varint(&mut buf, 0); // created_at
+        write_varint(&mut buf, 0); // kind
+        write_varint(&mut buf, 0); // content len
+        write_varint(&mut buf, 0); // num_tags
+
+        let note = NoteParser::new(&buf).into_note().unwrap();
+        let owned = note.to_owned().unwrap();
+
+        assert!(owned.tags.is_empty());
+        assert!(owned.content.is_empty());
+    }
+
+    #[test]
+    fn to_owned_empty_tag_elements() {
+        use crate::varint::{write_tagged_varint, write_varint};
+
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 32]); // id
+        buf.extend_from_slice(&[0x11; 32]); // pubkey
+        buf.extend_from_slice(&[0x22; 64]); // sig
+        write_varint(&mut buf, 0); // created_at
+        write_varint(&mut buf, 0); // kind
+        write_varint(&mut buf, 0); // content len
+        write_varint(&mut buf, 1); // num_tags
+        write_varint(&mut buf, 1); // tag 0 has 1 elem
+        write_tagged_varint(&mut buf, 0, false); // empty string
+
+        let note = NoteParser::new(&buf).into_note().unwrap();
+        let owned = note.to_owned().unwrap();
+
+        assert_eq!(owned.tags.len(), 1);
+        assert_eq!(owned.tags[0].len(), 1);
+        assert_eq!(owned.tags[0][0], "");
+    }
+}
+
+#[cfg(test)]
+mod serialization_tests {
+    use super::*;
+    use crate::NoteParser;
+
+    fn make_simple_note_bytes() -> Vec<u8> {
+        use crate::varint::{write_tagged_varint, write_varint};
+
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x11; 32]); // id
+        buf.extend_from_slice(&[0x22; 32]); // pubkey
+        buf.extend_from_slice(&[0x33; 64]); // sig
+        write_varint(&mut buf, 1700000000); // created_at
+        write_varint(&mut buf, 1); // kind
+        write_varint(&mut buf, 2); // content len
+        buf.extend_from_slice(b"hi"); // content
+        write_varint(&mut buf, 1); // num_tags
+        write_varint(&mut buf, 2); // tag 0 has 2 elems
+        write_tagged_varint(&mut buf, 1, false);
+        buf.push(b'p');
+        write_tagged_varint(&mut buf, 32, true);
+        buf.extend_from_slice(&[0x44; 32]);
+        buf
+    }
+
+    #[test]
+    fn note_serializes_to_json() {
+        let bytes = make_simple_note_bytes();
+        let note = NoteParser::new(&bytes).into_note().unwrap();
+
+        let json = serde_json::to_string(&note).unwrap();
+
+        // Should contain all fields
+        assert!(json.contains("\"id\":"));
+        assert!(json.contains("\"pubkey\":"));
+        assert!(json.contains("\"created_at\":"));
+        assert!(json.contains("\"kind\":"));
+        assert!(json.contains("\"tags\":"));
+        assert!(json.contains("\"content\":"));
+        assert!(json.contains("\"sig\":"));
+    }
+
+    #[test]
+    fn note_serializes_id_as_hex() {
+        let bytes = make_simple_note_bytes();
+        let note = NoteParser::new(&bytes).into_note().unwrap();
+
+        let json = serde_json::to_string(&note).unwrap();
+
+        // id should be lowercase hex
+        assert!(json.contains("\"id\":\"1111111111111111111111111111111111111111111111111111111111111111\""));
+    }
+
+    #[test]
+    fn note_serializes_tags_with_hex_for_bytes() {
+        let bytes = make_simple_note_bytes();
+        let note = NoteParser::new(&bytes).into_note().unwrap();
+
+        let json = serde_json::to_string(&note).unwrap();
+
+        // Tags should include the "p" and hex-encoded pubkey
+        assert!(json.contains("\"p\""));
+        assert!(json.contains("4444444444444444444444444444444444444444444444444444444444444444"));
+    }
+
+    #[test]
+    fn note_buf_roundtrip_through_json() {
+        let original = NoteBuf {
+            id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            pubkey: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            created_at: 1720000000,
+            kind: 1,
+            tags: vec![
+                vec!["e".into(), "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into()],
+                vec!["t".into(), "nostr".into()],
+            ],
+            content: "Hello, world!".into(),
+            sig: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into(),
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let recovered: NoteBuf = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(original.id, recovered.id);
+        assert_eq!(original.pubkey, recovered.pubkey);
+        assert_eq!(original.created_at, recovered.created_at);
+        assert_eq!(original.kind, recovered.kind);
+        assert_eq!(original.content, recovered.content);
+        assert_eq!(original.sig, recovered.sig);
+        assert_eq!(original.tags, recovered.tags);
+    }
+
+    #[test]
+    fn note_buf_default_is_empty() {
+        let note = NoteBuf::default();
+        assert!(note.id.is_empty());
+        assert!(note.pubkey.is_empty());
+        assert!(note.sig.is_empty());
+        assert!(note.content.is_empty());
+        assert!(note.tags.is_empty());
+        assert_eq!(note.created_at, 0);
+        assert_eq!(note.kind, 0);
+    }
+
+    #[test]
+    fn note_buf_clone() {
+        let original = NoteBuf {
+            id: "test".into(),
+            pubkey: "pub".into(),
+            created_at: 123,
+            kind: 1,
+            tags: vec![vec!["a".into()]],
+            content: "content".into(),
+            sig: "sig".into(),
+        };
+
+        let cloned = original.clone();
+        assert_eq!(original.id, cloned.id);
+        assert_eq!(original.tags, cloned.tags);
+    }
+
+    #[test]
+    fn note_buf_debug() {
+        let note = NoteBuf::default();
+        let debug = format!("{:?}", note);
+        assert!(debug.contains("NoteBuf"));
+    }
 }

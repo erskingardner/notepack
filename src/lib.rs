@@ -345,3 +345,402 @@ fn write_string_to<W: Write>(w: &mut W, string: &str) -> std::io::Result<usize> 
         Ok(len + string.len())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // decode_lowercase_hex tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn decode_lowercase_hex_valid() {
+        let result = decode_lowercase_hex("aabbccdd").unwrap();
+        assert_eq!(result, vec![0xaa, 0xbb, 0xcc, 0xdd]);
+    }
+
+    #[test]
+    fn decode_lowercase_hex_empty() {
+        let result = decode_lowercase_hex("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn decode_lowercase_hex_32_bytes() {
+        let hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let result = decode_lowercase_hex(hex).unwrap();
+        assert_eq!(result.len(), 32);
+        assert!(result.iter().all(|&b| b == 0xaa));
+    }
+
+    #[test]
+    fn decode_lowercase_hex_rejects_uppercase() {
+        let err = decode_lowercase_hex("AABBCCDD");
+        assert!(matches!(err, Err(Error::FromHex)));
+    }
+
+    #[test]
+    fn decode_lowercase_hex_rejects_mixed_case() {
+        let err = decode_lowercase_hex("aaBBccDD");
+        assert!(matches!(err, Err(Error::FromHex)));
+    }
+
+    #[test]
+    fn decode_lowercase_hex_rejects_odd_length() {
+        let err = decode_lowercase_hex("aabbc");
+        assert!(matches!(err, Err(Error::FromHex)));
+    }
+
+    #[test]
+    fn decode_lowercase_hex_rejects_invalid_chars() {
+        let err = decode_lowercase_hex("gghhiijj");
+        assert!(matches!(err, Err(Error::FromHex)));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // base64_encode tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn base64_encode_empty() {
+        assert_eq!(base64_encode(&[]), "");
+    }
+
+    #[test]
+    fn base64_encode_hello() {
+        assert_eq!(base64_encode(b"hello"), "aGVsbG8");
+    }
+
+    #[test]
+    fn base64_encode_no_padding() {
+        // "a" normally encodes to "YQ==" with padding
+        assert_eq!(base64_encode(b"a"), "YQ");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // pack_note / pack_note_into tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    fn minimal_note() -> NoteBuf {
+        NoteBuf {
+            id: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            pubkey: "1111111111111111111111111111111111111111111111111111111111111111".into(),
+            sig: "22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222".into(),
+            created_at: 0,
+            kind: 0,
+            content: "".into(),
+            tags: vec![],
+        }
+    }
+
+    #[test]
+    fn pack_note_minimal() {
+        let note = minimal_note();
+        let bytes = pack_note(&note).unwrap();
+
+        // version(1) + id(32) + pubkey(32) + sig(64) + created_at(1) + kind(1) + content_len(1) + num_tags(1)
+        // = 1 + 32 + 32 + 64 + 1 + 1 + 1 + 1 = 133
+        assert_eq!(bytes.len(), 133);
+
+        // Verify version byte
+        assert_eq!(bytes[0], 1);
+    }
+
+    #[test]
+    fn pack_note_into_appends_to_existing() {
+        let note = minimal_note();
+        let mut buf = vec![0xFF, 0xFF]; // pre-existing data
+        let written = pack_note_into(&note, &mut buf).unwrap();
+
+        assert_eq!(written, 133);
+        assert_eq!(buf.len(), 135); // 2 + 133
+        assert_eq!(buf[0], 0xFF);
+        assert_eq!(buf[1], 0xFF);
+        assert_eq!(buf[2], 1); // version
+    }
+
+    #[test]
+    fn pack_note_with_content() {
+        let mut note = minimal_note();
+        note.content = "hello".into();
+
+        let bytes = pack_note(&note).unwrap();
+        // Base 133 + 5 bytes content = 138
+        // But content_len varint is still 1 byte for 5
+        assert_eq!(bytes.len(), 138);
+    }
+
+    #[test]
+    fn pack_note_with_tags() {
+        let mut note = minimal_note();
+        note.tags = vec![
+            vec!["e".into(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into()],
+            vec!["p".into(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into()],
+        ];
+
+        let bytes = pack_note(&note).unwrap();
+        assert!(bytes.len() > 133);
+
+        // Decode and verify roundtrip
+        let parsed = NoteParser::new(&bytes).into_note().unwrap();
+        assert_eq!(parsed.tags.len(), 2);
+    }
+
+    #[test]
+    fn pack_note_invalid_hex_id() {
+        let mut note = minimal_note();
+        note.id = "not valid hex".into();
+
+        let err = pack_note(&note);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn pack_note_invalid_hex_pubkey() {
+        let mut note = minimal_note();
+        note.pubkey = "UPPERCASE".into();
+
+        let err = pack_note(&note);
+        assert!(err.is_err());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // pack_note_to_writer tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn pack_note_to_writer_matches_pack_note() {
+        let note = minimal_note();
+
+        let bytes = pack_note(&note).unwrap();
+
+        let mut writer_buf = Vec::new();
+        let written = pack_note_to_writer(&note, &mut writer_buf).unwrap();
+
+        assert_eq!(bytes, writer_buf);
+        assert_eq!(written, bytes.len());
+    }
+
+    #[test]
+    fn pack_note_to_writer_with_content_and_tags() {
+        let mut note = minimal_note();
+        note.content = "test content".into();
+        note.tags = vec![vec!["t".into(), "tag".into()]];
+
+        let bytes = pack_note(&note).unwrap();
+
+        let mut writer_buf = Vec::new();
+        pack_note_to_writer(&note, &mut writer_buf).unwrap();
+
+        assert_eq!(bytes, writer_buf);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // pack_note_to_string tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn pack_note_to_string_has_prefix() {
+        let note = minimal_note();
+        let s = pack_note_to_string(&note).unwrap();
+        assert!(s.starts_with("notepack_"));
+    }
+
+    #[test]
+    fn pack_note_to_string_valid_base64() {
+        let note = minimal_note();
+        let s = pack_note_to_string(&note).unwrap();
+
+        // Should decode back successfully
+        let decoded = NoteParser::decode(&s).unwrap();
+        assert!(!decoded.is_empty());
+    }
+
+    #[test]
+    fn pack_note_to_string_no_padding() {
+        let note = minimal_note();
+        let s = pack_note_to_string(&note).unwrap();
+
+        // Base64 should not have padding characters
+        assert!(!s.contains('='));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // write_string tests (hex detection)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn write_string_empty() {
+        let mut buf = Vec::new();
+        write_string(&mut buf, "");
+        // Empty string: tagged_varint(0, false) = 0
+        assert_eq!(buf, [0x00]);
+    }
+
+    #[test]
+    fn write_string_regular_text() {
+        let mut buf = Vec::new();
+        write_string(&mut buf, "hello");
+        // tagged_varint(5, false) = 10 = 0x0a, then "hello"
+        assert_eq!(&buf[0..1], &[0x0a]);
+        assert_eq!(&buf[1..], b"hello");
+    }
+
+    #[test]
+    fn write_string_lowercase_hex_compacted() {
+        let mut buf = Vec::new();
+        write_string(&mut buf, "aabb");
+        // tagged_varint(2, true) = (2 << 1) | 1 = 5 = 0x05
+        // Then raw bytes 0xaa 0xbb
+        assert_eq!(buf, [0x05, 0xaa, 0xbb]);
+    }
+
+    #[test]
+    fn write_string_uppercase_hex_not_compacted() {
+        let mut buf = Vec::new();
+        write_string(&mut buf, "AABB");
+        // Should be treated as text, not compacted
+        // tagged_varint(4, false) = 8 = 0x08
+        assert_eq!(&buf[0..1], &[0x08]);
+        assert_eq!(&buf[1..], b"AABB");
+    }
+
+    #[test]
+    fn write_string_mixed_case_hex_not_compacted() {
+        let mut buf = Vec::new();
+        write_string(&mut buf, "aAbB");
+        // Mixed case should be treated as text
+        assert_eq!(&buf[0..1], &[0x08]);
+        assert_eq!(&buf[1..], b"aAbB");
+    }
+
+    #[test]
+    fn write_string_odd_length_hex_not_compacted() {
+        let mut buf = Vec::new();
+        write_string(&mut buf, "aab");
+        // Odd length is not valid hex
+        assert_eq!(&buf[0..1], &[0x06]); // tagged_varint(3, false) = 6
+        assert_eq!(&buf[1..], b"aab");
+    }
+
+    #[test]
+    fn write_string_32byte_pubkey_compacted() {
+        let pubkey = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mut buf = Vec::new();
+        write_string(&mut buf, pubkey);
+
+        // tagged_varint(32, true) = (32 << 1) | 1 = 65 = 0x41
+        assert_eq!(buf[0], 0x41);
+        assert_eq!(buf.len(), 1 + 32);
+        assert!(buf[1..].iter().all(|&b| b == 0xbb));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // write_string_to tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn write_string_to_matches_buffer_version() {
+        let test_cases = ["", "hello", "aabb", "AABB", "test123"];
+
+        for s in test_cases {
+            let mut buf = Vec::new();
+            write_string(&mut buf, s);
+
+            let mut writer_buf = Vec::new();
+            let written = write_string_to(&mut writer_buf, s).unwrap();
+
+            assert_eq!(buf, writer_buf, "mismatch for string '{s}'");
+            assert_eq!(written, buf.len());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Roundtrip tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn roundtrip_minimal_note() {
+        let note = minimal_note();
+        let bytes = pack_note(&note).unwrap();
+        let parsed = NoteParser::new(&bytes).into_note().unwrap();
+        let recovered = parsed.to_owned().unwrap();
+
+        assert_eq!(note.id, recovered.id);
+        assert_eq!(note.pubkey, recovered.pubkey);
+        assert_eq!(note.sig, recovered.sig);
+        assert_eq!(note.created_at, recovered.created_at);
+        assert_eq!(note.kind, recovered.kind);
+        assert_eq!(note.content, recovered.content);
+        assert_eq!(note.tags, recovered.tags);
+    }
+
+    #[test]
+    fn roundtrip_with_content() {
+        let mut note = minimal_note();
+        note.content = "Hello, Nostr! 🎉".into();
+
+        let bytes = pack_note(&note).unwrap();
+        let parsed = NoteParser::new(&bytes).into_note().unwrap();
+        let recovered = parsed.to_owned().unwrap();
+
+        assert_eq!(note.content, recovered.content);
+    }
+
+    #[test]
+    fn roundtrip_with_tags() {
+        let mut note = minimal_note();
+        note.tags = vec![
+            vec!["e".into(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "wss://relay.example.com".into()],
+            vec!["p".into(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into()],
+            vec!["t".into(), "nostr".into()],
+        ];
+
+        let bytes = pack_note(&note).unwrap();
+        let parsed = NoteParser::new(&bytes).into_note().unwrap();
+        let recovered = parsed.to_owned().unwrap();
+
+        assert_eq!(note.tags, recovered.tags);
+    }
+
+    #[test]
+    fn roundtrip_via_base64_string() {
+        let mut note = minimal_note();
+        note.content = "test".into();
+        note.kind = 1;
+        note.created_at = 1720000000;
+
+        let encoded = pack_note_to_string(&note).unwrap();
+        let decoded_bytes = NoteParser::decode(&encoded).unwrap();
+        let parsed = NoteParser::new(&decoded_bytes).into_note().unwrap();
+        let recovered = parsed.to_owned().unwrap();
+
+        assert_eq!(note.id, recovered.id);
+        assert_eq!(note.pubkey, recovered.pubkey);
+        assert_eq!(note.sig, recovered.sig);
+        assert_eq!(note.created_at, recovered.created_at);
+        assert_eq!(note.kind, recovered.kind);
+        assert_eq!(note.content, recovered.content);
+    }
+
+    #[test]
+    fn roundtrip_large_timestamp() {
+        let mut note = minimal_note();
+        note.created_at = u64::MAX;
+
+        let bytes = pack_note(&note).unwrap();
+        let parsed = NoteParser::new(&bytes).into_note().unwrap();
+        assert_eq!(parsed.created_at, u64::MAX);
+    }
+
+    #[test]
+    fn roundtrip_large_kind() {
+        let mut note = minimal_note();
+        note.kind = u64::MAX;
+
+        let bytes = pack_note(&note).unwrap();
+        let parsed = NoteParser::new(&bytes).into_note().unwrap();
+        assert_eq!(parsed.kind, u64::MAX);
+    }
+}

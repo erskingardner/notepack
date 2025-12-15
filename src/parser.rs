@@ -629,3 +629,382 @@ mod into_note_tests {
         matches!(err, Error::Truncated);
     }
 }
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+
+    #[test]
+    fn decode_valid_notepack_string() {
+        let encoded = "notepack_AQ"; // minimal: version=1, then truncated but decode doesn't validate
+        let result = NoteParser::decode(encoded);
+        assert!(result.is_ok());
+        // Decoded bytes should be [0x01] (version 1)
+        assert_eq!(result.unwrap(), vec![0x01]);
+    }
+
+    #[test]
+    fn decode_rejects_missing_prefix() {
+        let result = NoteParser::decode("AQ");
+        assert!(matches!(result, Err(Error::InvalidPrefix)));
+    }
+
+    #[test]
+    fn decode_rejects_wrong_prefix() {
+        let result = NoteParser::decode("notepackAQ");
+        assert!(matches!(result, Err(Error::InvalidPrefix)));
+    }
+
+    #[test]
+    fn decode_rejects_invalid_base64() {
+        let result = NoteParser::decode("notepack_!!invalid!!");
+        assert!(matches!(result, Err(Error::Decode(_))));
+    }
+
+    #[test]
+    fn decode_empty_base64_after_prefix() {
+        let result = NoteParser::decode("notepack_");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod iterator_tests {
+    use super::*;
+    use crate::varint::{write_tagged_varint, write_varint};
+
+    fn build_minimal_note() -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 32]); // id
+        buf.extend_from_slice(&[0x11; 32]); // pubkey
+        buf.extend_from_slice(&[0x22; 64]); // sig
+        write_varint(&mut buf, 1720000000); // created_at
+        write_varint(&mut buf, 1); // kind
+        write_varint(&mut buf, 5); // content len
+        buf.extend_from_slice(b"hello"); // content
+        write_varint(&mut buf, 0); // num_tags
+        buf
+    }
+
+    #[test]
+    fn iterator_yields_all_fields_in_order() {
+        let bytes = build_minimal_note();
+        let mut parser = NoteParser::new(&bytes);
+
+        // Version
+        let field = parser.next().unwrap().unwrap();
+        assert!(matches!(field, ParsedField::Version(1)));
+
+        // Id
+        let field = parser.next().unwrap().unwrap();
+        assert!(matches!(field, ParsedField::Id(_)));
+
+        // Pubkey
+        let field = parser.next().unwrap().unwrap();
+        assert!(matches!(field, ParsedField::Pubkey(_)));
+
+        // Sig
+        let field = parser.next().unwrap().unwrap();
+        assert!(matches!(field, ParsedField::Sig(_)));
+
+        // CreatedAt
+        let field = parser.next().unwrap().unwrap();
+        assert!(matches!(field, ParsedField::CreatedAt(1720000000)));
+
+        // Kind
+        let field = parser.next().unwrap().unwrap();
+        assert!(matches!(field, ParsedField::Kind(1)));
+
+        // Content
+        let field = parser.next().unwrap().unwrap();
+        if let ParsedField::Content(c) = field {
+            assert_eq!(c, "hello");
+        } else {
+            panic!("expected Content");
+        }
+
+        // NumTags
+        let field = parser.next().unwrap().unwrap();
+        assert!(matches!(field, ParsedField::NumTags(0)));
+
+        // Done
+        assert!(parser.next().is_none());
+    }
+
+    #[test]
+    fn iterator_state_transitions() {
+        let bytes = build_minimal_note();
+        let mut parser = NoteParser::new(&bytes);
+
+        assert_eq!(parser.current_state(), ParserState::Start);
+
+        parser.next(); // version
+        assert_eq!(parser.current_state(), ParserState::AfterVersion);
+
+        parser.next(); // id
+        assert_eq!(parser.current_state(), ParserState::AfterId);
+
+        parser.next(); // pubkey
+        assert_eq!(parser.current_state(), ParserState::AfterPubkey);
+
+        parser.next(); // sig
+        assert_eq!(parser.current_state(), ParserState::AfterSig);
+
+        parser.next(); // created_at
+        assert_eq!(parser.current_state(), ParserState::AfterCreatedAt);
+
+        parser.next(); // kind
+        assert_eq!(parser.current_state(), ParserState::AfterKind);
+
+        parser.next(); // content
+        assert_eq!(parser.current_state(), ParserState::AfterContent);
+
+        parser.next(); // num_tags (0, so goes to Done)
+        assert_eq!(parser.current_state(), ParserState::Done);
+
+        // No more items
+        assert!(parser.next().is_none());
+        assert_eq!(parser.current_state(), ParserState::Done);
+    }
+
+    #[test]
+    fn iterator_with_tags() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 32]); // id
+        buf.extend_from_slice(&[0x11; 32]); // pubkey
+        buf.extend_from_slice(&[0x22; 64]); // sig
+        write_varint(&mut buf, 100); // created_at
+        write_varint(&mut buf, 1); // kind
+        write_varint(&mut buf, 0); // content len (empty)
+        write_varint(&mut buf, 2); // num_tags
+
+        // Tag 1: ["e", <32-byte hex>]
+        write_varint(&mut buf, 2); // num_elems
+        write_tagged_varint(&mut buf, 1, false); // "e"
+        buf.push(b'e');
+        write_tagged_varint(&mut buf, 32, true); // 32 bytes
+        buf.extend_from_slice(&[0xaa; 32]);
+
+        // Tag 2: ["p"]
+        write_varint(&mut buf, 1); // num_elems
+        write_tagged_varint(&mut buf, 1, false); // "p"
+        buf.push(b'p');
+
+        let parser = NoteParser::new(&buf);
+        let mut tag_count = 0;
+        let mut num_tag_elems_count = 0;
+
+        for field in parser {
+            let f = field.unwrap();
+            if matches!(f, ParsedField::Tag(_)) {
+                tag_count += 1;
+            }
+            if matches!(f, ParsedField::NumTagElems(_)) {
+                num_tag_elems_count += 1;
+            }
+        }
+
+        // NumTagElems is emitted once per tag (2 tags)
+        // Tag is emitted for each element across all tags (2 + 1 = 3)
+        assert_eq!(num_tag_elems_count, 2);
+        assert_eq!(tag_count, 3);
+    }
+
+    #[test]
+    fn iterator_halts_after_done() {
+        let bytes = build_minimal_note();
+        let mut parser = NoteParser::new(&bytes);
+
+        // Consume all fields
+        while parser.next().is_some() {}
+
+        assert_eq!(parser.current_state(), ParserState::Done);
+
+        // Multiple calls after done return None
+        assert!(parser.next().is_none());
+        assert!(parser.next().is_none());
+        assert!(parser.next().is_none());
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+    use crate::varint::write_varint;
+
+    #[test]
+    fn error_truncated_id() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 16]); // only 16 bytes, need 32
+
+        let mut parser = NoteParser::new(&buf);
+        parser.next(); // version ok
+        let result = parser.next(); // id should fail
+        assert!(matches!(result, Some(Err(Error::Truncated))));
+        assert_eq!(parser.current_state(), ParserState::Errored);
+    }
+
+    #[test]
+    fn error_truncated_pubkey() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 32]); // id ok
+        buf.extend_from_slice(&[0x11; 16]); // pubkey only 16 bytes
+
+        let mut parser = NoteParser::new(&buf);
+        parser.next(); // version
+        parser.next(); // id
+        let result = parser.next(); // pubkey fails
+        assert!(matches!(result, Some(Err(Error::Truncated))));
+    }
+
+    #[test]
+    fn error_truncated_sig() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 32]); // id
+        buf.extend_from_slice(&[0x11; 32]); // pubkey
+        buf.extend_from_slice(&[0x22; 32]); // sig only 32 bytes, need 64
+
+        let mut parser = NoteParser::new(&buf);
+        parser.next(); // version
+        parser.next(); // id
+        parser.next(); // pubkey
+        let result = parser.next(); // sig fails
+        assert!(matches!(result, Some(Err(Error::Truncated))));
+    }
+
+    #[test]
+    fn error_truncated_content() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 32]); // id
+        buf.extend_from_slice(&[0x11; 32]); // pubkey
+        buf.extend_from_slice(&[0x22; 64]); // sig
+        write_varint(&mut buf, 100); // created_at
+        write_varint(&mut buf, 1); // kind
+        write_varint(&mut buf, 100); // content len claims 100 bytes
+        buf.extend_from_slice(b"short"); // only 5 bytes
+
+        let mut parser = NoteParser::new(&buf);
+        for _ in 0..6 {
+            parser.next(); // consume up to kind
+        }
+        let result = parser.next(); // content fails
+        assert!(matches!(result, Some(Err(Error::Truncated))));
+    }
+
+    #[test]
+    fn error_invalid_utf8_content() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0x00; 32]); // id
+        buf.extend_from_slice(&[0x11; 32]); // pubkey
+        buf.extend_from_slice(&[0x22; 64]); // sig
+        write_varint(&mut buf, 100); // created_at
+        write_varint(&mut buf, 1); // kind
+        write_varint(&mut buf, 2); // content len
+        buf.extend_from_slice(&[0xff, 0xfe]); // invalid UTF-8
+
+        let mut parser = NoteParser::new(&buf);
+        for _ in 0..6 {
+            parser.next();
+        }
+        let result = parser.next(); // content fails with UTF-8 error
+        assert!(matches!(result, Some(Err(Error::Utf8(_)))));
+    }
+
+    #[test]
+    fn error_halts_iteration() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version only, then truncated
+
+        let mut parser = NoteParser::new(&buf);
+        parser.next(); // version ok
+        let result = parser.next(); // should fail
+        assert!(matches!(result, Some(Err(_))));
+
+        // After error, parser is halted
+        assert!(parser.next().is_none());
+        assert!(parser.next().is_none());
+    }
+
+    #[test]
+    fn error_empty_input() {
+        let buf: Vec<u8> = vec![];
+        let mut parser = NoteParser::new(&buf);
+
+        // First next should fail (can't read version)
+        let result = parser.next();
+        assert!(matches!(result, Some(Err(Error::VarintUnterminated))));
+    }
+}
+
+#[cfg(test)]
+mod read_string_tests {
+    use super::*;
+    use crate::varint::write_tagged_varint;
+
+    #[test]
+    fn read_string_utf8() {
+        let mut buf = Vec::new();
+        write_tagged_varint(&mut buf, 5, false);
+        buf.extend_from_slice(b"hello");
+
+        let mut slice = buf.as_slice();
+        let result = read_string(&mut slice).unwrap();
+        assert!(matches!(result, StringType::Str("hello")));
+        assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn read_string_bytes() {
+        let mut buf = Vec::new();
+        write_tagged_varint(&mut buf, 3, true);
+        buf.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+
+        let mut slice = buf.as_slice();
+        let result = read_string(&mut slice).unwrap();
+        if let StringType::Bytes(bs) = result {
+            assert_eq!(bs, &[0xaa, 0xbb, 0xcc]);
+        } else {
+            panic!("expected Bytes");
+        }
+    }
+
+    #[test]
+    fn read_string_empty() {
+        let mut buf = Vec::new();
+        write_tagged_varint(&mut buf, 0, false);
+
+        let mut slice = buf.as_slice();
+        let result = read_string(&mut slice).unwrap();
+        assert!(matches!(result, StringType::Str("")));
+    }
+
+    #[test]
+    fn read_string_truncated() {
+        let mut buf = Vec::new();
+        write_tagged_varint(&mut buf, 10, false); // claims 10 bytes
+        buf.extend_from_slice(b"abc"); // only 3
+
+        let mut slice = buf.as_slice();
+        let result = read_string(&mut slice);
+        assert!(matches!(result, Err(Error::Truncated)));
+    }
+
+    #[test]
+    fn read_string_invalid_utf8() {
+        let mut buf = Vec::new();
+        write_tagged_varint(&mut buf, 2, false); // UTF-8 string
+        buf.extend_from_slice(&[0xff, 0xfe]); // invalid UTF-8
+
+        let mut slice = buf.as_slice();
+        let result = read_string(&mut slice);
+        assert!(matches!(result, Err(Error::Utf8(_))));
+    }
+}

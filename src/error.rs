@@ -119,3 +119,132 @@ impl From<std::io::Error> for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Display tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn display_truncated() {
+        let err = Error::Truncated;
+        assert_eq!(err.to_string(), "notepack string is truncated");
+    }
+
+    #[test]
+    fn display_varint_overflow() {
+        let err = Error::VarintOverflow;
+        assert_eq!(err.to_string(), "varint overflowed");
+    }
+
+    #[test]
+    fn display_varint_unterminated() {
+        let err = Error::VarintUnterminated;
+        assert_eq!(err.to_string(), "varint is unterminated");
+    }
+
+    #[test]
+    fn display_from_hex() {
+        let err = Error::FromHex;
+        assert_eq!(err.to_string(), "error when converting from hex");
+    }
+
+    #[test]
+    fn display_invalid_prefix() {
+        let err = Error::InvalidPrefix;
+        assert_eq!(err.to_string(), "String did not start with notepack_");
+    }
+
+    #[test]
+    fn display_utf8_error() {
+        // Create an invalid UTF-8 sequence at runtime to avoid compile-time warning
+        let bytes: Vec<u8> = vec![0xff, 0xfe];
+        let utf8_err = std::str::from_utf8(&bytes).unwrap_err();
+        let err = Error::Utf8(utf8_err);
+        assert!(err.to_string().starts_with("utf8 error:"));
+    }
+
+    #[test]
+    fn display_decode_error() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        let decode_err = STANDARD.decode("!!!invalid!!!").unwrap_err();
+        let err = Error::Decode(decode_err);
+        assert!(err.to_string().starts_with("base64 decode err:"));
+    }
+
+    #[test]
+    fn display_json_error() {
+        let json_err = serde_json::from_str::<String>("not valid json").unwrap_err();
+        let err = Error::Json(json_err);
+        assert!(err.to_string().starts_with("json error:"));
+    }
+
+    #[test]
+    fn display_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err = Error::Io(io_err);
+        assert!(err.to_string().starts_with("io error:"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // From trait tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn from_utf8_error() {
+        // Use Vec to avoid compile-time invalid literal warning
+        let bytes: Vec<u8> = vec![0xff, 0xfe];
+        let utf8_err = std::str::from_utf8(&bytes).unwrap_err();
+        let err: Error = utf8_err.into();
+        assert!(matches!(err, Error::Utf8(_)));
+    }
+
+    #[test]
+    fn from_base64_decode_error() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        let decode_err = STANDARD.decode("!!!").unwrap_err();
+        let err: Error = decode_err.into();
+        assert!(matches!(err, Error::Decode(_)));
+    }
+
+    #[test]
+    fn from_hex_simd_error() {
+        let hex_err = hex_simd::decode_to_vec("zz").unwrap_err();
+        let err: Error = hex_err.into();
+        assert!(matches!(err, Error::FromHex));
+    }
+
+    #[test]
+    fn from_serde_json_error() {
+        let json_err = serde_json::from_str::<i32>("nope").unwrap_err();
+        let err: Error = json_err.into();
+        assert!(matches!(err, Error::Json(_)));
+    }
+
+    #[test]
+    fn from_io_error() {
+        let io_err = std::io::Error::other("test");
+        let err: Error = io_err.into();
+        assert!(matches!(err, Error::Io(_)));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // std::error::Error trait
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn error_trait_implemented() {
+        fn assert_error<E: std::error::Error>() {}
+        assert_error::<Error>();
+    }
+
+    #[test]
+    fn error_is_debug() {
+        let err = Error::Truncated;
+        let debug_str = format!("{:?}", err);
+        assert_eq!(debug_str, "Truncated");
+    }
+}
