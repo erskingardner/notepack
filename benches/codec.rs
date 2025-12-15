@@ -190,4 +190,3 @@ fn bench_codec(c: &mut Criterion) {
 
 criterion_group!(benches, bench_codec);
 criterion_main!(benches);
-

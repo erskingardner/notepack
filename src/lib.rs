@@ -46,7 +46,7 @@
 //!
 //! for field in parser {
 //!     match field.unwrap() {
-//!         ParsedField::Id(id) => println!("id: {}", hex::encode(id)),
+//!         ParsedField::Id(id) => println!("id: {}", hex_simd::encode_to_string(id, hex_simd::AsciiCase::Lower)),
 //!         ParsedField::Content(c) => println!("content: {}", c),
 //!         _ => {}
 //!     }
@@ -122,15 +122,15 @@ pub fn pack_note_into(note: &NoteBuf, buf: &mut Vec<u8>) -> Result<usize, Error>
     write_varint(buf, 1);
 
     // id
-    let id_bytes = hex::decode(&note.id)?;
+    let id_bytes = hex_simd::decode_to_vec(&note.id)?;
     buf.extend_from_slice(&id_bytes);
 
     // pubkey
-    let pk_bytes = hex::decode(&note.pubkey)?;
+    let pk_bytes = hex_simd::decode_to_vec(&note.pubkey)?;
     buf.extend_from_slice(&pk_bytes);
 
     // signature
-    let sig_bytes = hex::decode(&note.sig)?;
+    let sig_bytes = hex_simd::decode_to_vec(&note.sig)?;
     buf.extend_from_slice(&sig_bytes);
 
     write_varint(buf, note.created_at);
@@ -224,17 +224,17 @@ pub fn pack_note_to_writer<W: Write>(note: &NoteBuf, w: &mut W) -> Result<usize,
     len += write_varint_to(w, 1)?;
 
     // id
-    let id_bytes = hex::decode(&note.id)?;
+    let id_bytes = hex_simd::decode_to_vec(&note.id)?;
     w.write_all(&id_bytes)?;
     len += id_bytes.len();
 
     // pubkey
-    let pk_bytes = hex::decode(&note.pubkey)?;
+    let pk_bytes = hex_simd::decode_to_vec(&note.pubkey)?;
     w.write_all(&pk_bytes)?;
     len += pk_bytes.len();
 
     // signature
-    let sig_bytes = hex::decode(&note.sig)?;
+    let sig_bytes = hex_simd::decode_to_vec(&note.sig)?;
     w.write_all(&sig_bytes)?;
     len += sig_bytes.len();
 
@@ -301,7 +301,7 @@ fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, Error> {
         return Err(Error::FromHex);
     }
 
-    Ok(hex::decode(input)?)
+    Ok(hex_simd::decode_to_vec(input)?)
 }
 
 fn write_string(buf: &mut Vec<u8>, string: &str) {

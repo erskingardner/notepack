@@ -10,7 +10,7 @@ fn main() -> Result<(), Error> {
 
     if let Ok(packed) = NoteParser::decode(buffer.trim()) {
         if output_hex {
-            println!("{}", hex::encode(&packed));
+            println!("{}", hex_simd::encode_to_string(&packed, hex_simd::AsciiCase::Lower));
             return Ok(());
         }
 
@@ -33,13 +33,13 @@ fn process_field(note: &mut NoteBuf, field: ParsedField<'_>) {
     match field {
         ParsedField::Version(_v) => {}
         ParsedField::Id(id) => {
-            note.id = hex::encode(id);
+            note.id = hex_simd::encode_to_string(id, hex_simd::AsciiCase::Lower);
         }
         ParsedField::Pubkey(pk) => {
-            note.pubkey = hex::encode(pk);
+            note.pubkey = hex_simd::encode_to_string(pk, hex_simd::AsciiCase::Lower);
         }
         ParsedField::Sig(sig) => {
-            note.sig = hex::encode(sig);
+            note.sig = hex_simd::encode_to_string(sig, hex_simd::AsciiCase::Lower);
         }
         ParsedField::CreatedAt(ts) => {
             note.created_at = ts;
@@ -57,7 +57,7 @@ fn process_field(note: &mut NoteBuf, field: ParsedField<'_>) {
             let current = &mut note.tags[ind];
             match tag {
                 StringType::Bytes(bs) => {
-                    current.push(hex::encode(bs));
+                    current.push(hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower));
                 }
                 StringType::Str(s) => {
                     current.push(s.to_string());
@@ -71,9 +71,9 @@ fn process_field(note: &mut NoteBuf, field: ParsedField<'_>) {
 fn print_field(field: ParsedField<'_>) {
     match field {
         ParsedField::Version(v) => eprintln!("version: {}", v),
-        ParsedField::Id(id) => eprintln!("id: {}", hex::encode(id)),
-        ParsedField::Pubkey(pk) => eprintln!("pk: {}", hex::encode(pk)),
-        ParsedField::Sig(sig) => eprintln!("sig: {}", hex::encode(sig)),
+        ParsedField::Id(id) => eprintln!("id: {}", hex_simd::encode_to_string(id, hex_simd::AsciiCase::Lower)),
+        ParsedField::Pubkey(pk) => eprintln!("pk: {}", hex_simd::encode_to_string(pk, hex_simd::AsciiCase::Lower)),
+        ParsedField::Sig(sig) => eprintln!("sig: {}", hex_simd::encode_to_string(sig, hex_simd::AsciiCase::Lower)),
         ParsedField::CreatedAt(ts) => eprintln!("created_at: {}", ts),
         ParsedField::Kind(kind) => eprintln!("kind: {}", kind),
         ParsedField::Content(content) => eprintln!("content: '{}'", content),
@@ -82,7 +82,7 @@ fn print_field(field: ParsedField<'_>) {
             eprintln!()
         }
         ParsedField::Tag(tag) => match tag {
-            StringType::Bytes(bs) => eprint!(" b:{}", hex::encode(bs)),
+            StringType::Bytes(bs) => eprint!(" b:{}", hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower)),
             StringType::Str(s) => eprint!(" s:{}", s),
         },
     }

@@ -57,8 +57,8 @@ impl From<base64::DecodeError> for Error {
     }
 }
 
-impl From<hex::FromHexError> for Error {
-    fn from(_err: hex::FromHexError) -> Self {
+impl From<hex_simd::Error> for Error {
+    fn from(_err: hex_simd::Error) -> Self {
         Error::FromHex
     }
 }

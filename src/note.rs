@@ -78,16 +78,16 @@ impl<'a> Note<'a> {
             for elem in &mut elems {
                 match elem? {
                     StringType::Str(s) => tag_vec.push(s.to_string()),
-                    StringType::Bytes(bs) => tag_vec.push(hex::encode(bs)),
+                    StringType::Bytes(bs) => tag_vec.push(hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower)),
                 }
             }
             tags_vec.push(tag_vec);
         }
 
         Ok(NoteBuf {
-            id: hex::encode(self.id),
-            pubkey: hex::encode(self.pubkey),
-            sig: hex::encode(self.sig),
+            id: hex_simd::encode_to_string(self.id, hex_simd::AsciiCase::Lower),
+            pubkey: hex_simd::encode_to_string(self.pubkey, hex_simd::AsciiCase::Lower),
+            sig: hex_simd::encode_to_string(self.sig, hex_simd::AsciiCase::Lower),
             content: self.content.to_string(),
             created_at: self.created_at,
             kind: self.kind,
@@ -105,8 +105,8 @@ impl<'a> Serialize for Note<'a> {
         let mut st = serializer.serialize_struct("Note", 7)?;
 
         // Hex-encode fixed-size fields (lowercase).
-        st.serialize_field("id", &hex::encode(self.id))?;
-        st.serialize_field("pubkey", &hex::encode(self.pubkey))?;
+        st.serialize_field("id", &hex_simd::encode_to_string(self.id, hex_simd::AsciiCase::Lower))?;
+        st.serialize_field("pubkey", &hex_simd::encode_to_string(self.pubkey, hex_simd::AsciiCase::Lower))?;
         st.serialize_field("created_at", &self.created_at)?;
         st.serialize_field("kind", &self.kind)?;
 
@@ -127,7 +127,7 @@ impl<'a> Serialize for Note<'a> {
             {
                 match elem {
                     crate::stringtype::StringType::Str(s) => tag_vec.push(s.to_string()),
-                    crate::stringtype::StringType::Bytes(bs) => tag_vec.push(hex::encode(bs)),
+                    crate::stringtype::StringType::Bytes(bs) => tag_vec.push(hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower)),
                 }
             }
             tags_json.push(tag_vec);
@@ -135,7 +135,7 @@ impl<'a> Serialize for Note<'a> {
 
         st.serialize_field("tags", &tags_json)?;
         st.serialize_field("content", &self.content)?;
-        st.serialize_field("sig", &hex::encode(self.sig))?;
+        st.serialize_field("sig", &hex_simd::encode_to_string(self.sig, hex_simd::AsciiCase::Lower))?;
 
         st.end()
     }
@@ -163,7 +163,7 @@ impl<'a> Serialize for Note<'a> {
 ///     for elem in &mut elems {
 ///         match elem? {
 ///             StringType::Str(s) => println!("str: {s}"),
-///             StringType::Bytes(bs) => println!("hex: {}", hex::encode(bs)),
+///             StringType::Bytes(bs) => println!("hex: {}", hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower)),
 ///         }
 ///     }
 /// }
@@ -207,7 +207,7 @@ pub struct Tags<'a> {
 ///     for elem in &mut elems {
 ///         match elem? {
 ///             StringType::Str(s) => println!("text: {s}"),
-///             StringType::Bytes(bs) => println!("hex: {}", hex::encode(bs)),
+///             StringType::Bytes(bs) => println!("hex: {}", hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower)),
 ///         }
 ///     }
 /// }
@@ -391,7 +391,7 @@ mod tests {
             for x in &mut t0 {
                 match x? {
                     StringType::Str(s) => out.push(format!("S:{s}")),
-                    StringType::Bytes(bs) => out.push(format!("B:{}", hex::encode(bs))),
+                    StringType::Bytes(bs) => out.push(format!("B:{}", hex_simd::encode_to_string(bs, hex_simd::AsciiCase::Lower))),
                 }
             }
             assert_eq!(out, &["S:p", "B:aabb", "S:hello"]);
