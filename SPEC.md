@@ -29,7 +29,7 @@ All multi‑byte integers use **unsigned LEB128 (ULEB128)**. Bit 7 indicates con
 ### 3.1 Top‑level layout
 
 ```
-notepack-binary = 
+notepack-binary =
     varint(version)        ; format version (currently 1)
   | id[32]                 ; raw 32 bytes
   | pubkey[32]             ; raw 32 bytes
@@ -47,7 +47,7 @@ notepack-binary =
 ### 3.2 Tags
 
 ```
-tag = 
+tag =
   varint(num_elems)
   repeated num_elems * tag_elem
 ```

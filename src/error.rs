@@ -8,6 +8,7 @@ pub enum Error {
     Decode(base64::DecodeError),
     InvalidPrefix,
     Json(serde_json::Error),
+    Io(std::io::Error),
 }
 
 impl core::fmt::Display for Error {
@@ -37,6 +38,9 @@ impl core::fmt::Display for Error {
             Error::Json(err) => {
                 write!(f, "json error: {err}")
             }
+            Error::Io(err) => {
+                write!(f, "io error: {err}")
+            }
         }
     }
 }
@@ -62,6 +66,12 @@ impl From<hex::FromHexError> for Error {
 impl From<serde_json::Error> for Error {
     fn from(err: serde_json::Error) -> Self {
         Error::Json(err)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Error::Io(err)
     }
 }
 

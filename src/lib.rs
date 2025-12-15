@@ -1,7 +1,7 @@
 //! # notepack
 //!
 //! A Rust library for packing and parsing [nostr](https://github.com/nostr-protocol/nostr) notes
-//! into a compact binary format called **notepack**.  
+//! into a compact binary format called **notepack**.
 //!
 //! This crate provides two core capabilities:
 //!
@@ -90,7 +90,8 @@ pub use note::{Note, NoteBuf, Tags, TagElems};
 pub use parser::{NoteParser, ParsedField, ParserState};
 pub use stringtype::StringType;
 
-use varint::{write_tagged_varint, write_varint};
+use std::io::Write;
+use varint::{write_tagged_varint, write_tagged_varint_to, write_varint, write_varint_to};
 
 /// Packs a [`NoteBuf`] into an existing buffer, appending the binary payload.
 ///
@@ -183,6 +184,79 @@ pub fn pack_note(note: &NoteBuf) -> Result<Vec<u8>, Error> {
     Ok(buf)
 }
 
+/// Packs a [`NoteBuf`] to any [`Write`] implementor (files, sockets, compression streams, etc.).
+///
+/// This is the streaming encoding API for I/O. It writes the notepack binary directly
+/// to the provided writer without intermediate buffering.
+///
+/// Returns the number of bytes written, or an [`Error`] if encoding or I/O fails.
+///
+/// # Errors
+///
+/// - [`Error::FromHex`] if any hex string field fails to decode.
+/// - [`Error::Io`] if writing to the writer fails.
+///
+/// # Example
+///
+/// ```rust
+/// use notepack::{NoteBuf, pack_note_to_writer};
+///
+/// let note = NoteBuf::default();
+/// let mut output = Vec::new();
+/// let len = pack_note_to_writer(&note, &mut output).unwrap();
+/// assert_eq!(len, output.len());
+/// ```
+///
+/// Writing to a file:
+///
+/// ```no_run
+/// use notepack::{NoteBuf, pack_note_to_writer};
+/// use std::fs::File;
+///
+/// let note = NoteBuf::default();
+/// let mut file = File::create("note.bin").unwrap();
+/// pack_note_to_writer(&note, &mut file).unwrap();
+/// ```
+pub fn pack_note_to_writer<W: Write>(note: &NoteBuf, w: &mut W) -> Result<usize, Error> {
+    let mut len = 0;
+
+    // version
+    len += write_varint_to(w, 1)?;
+
+    // id
+    let id_bytes = hex::decode(&note.id)?;
+    w.write_all(&id_bytes)?;
+    len += id_bytes.len();
+
+    // pubkey
+    let pk_bytes = hex::decode(&note.pubkey)?;
+    w.write_all(&pk_bytes)?;
+    len += pk_bytes.len();
+
+    // signature
+    let sig_bytes = hex::decode(&note.sig)?;
+    w.write_all(&sig_bytes)?;
+    len += sig_bytes.len();
+
+    len += write_varint_to(w, note.created_at)?;
+    len += write_varint_to(w, note.kind)?;
+    len += write_varint_to(w, note.content.len() as u64)?;
+    w.write_all(note.content.as_bytes())?;
+    len += note.content.len();
+
+    len += write_varint_to(w, note.tags.len() as u64)?;
+
+    for tag in &note.tags {
+        len += write_varint_to(w, tag.len() as u64)?;
+
+        for elem in tag {
+            len += write_string_to(w, elem.as_str())?;
+        }
+    }
+
+    Ok(len)
+}
+
 /// Encodes a [`Note`] directly to a `notepack_...` Base64 string.
 ///
 /// This is a convenience wrapper around [`pack_note`], taking the binary payload and
@@ -243,5 +317,21 @@ fn write_string(buf: &mut Vec<u8>, string: &str) {
     } else {
         write_tagged_varint(buf, string.len() as u64, false);
         buf.extend_from_slice(string.as_bytes());
+    }
+}
+
+fn write_string_to<W: Write>(w: &mut W, string: &str) -> std::io::Result<usize> {
+    if string.is_empty() {
+        return write_tagged_varint_to(w, 0, false);
+    }
+
+    if let Ok(val) = decode_lowercase_hex(string) {
+        let len = write_tagged_varint_to(w, val.len() as u64, true)?;
+        w.write_all(&val)?;
+        Ok(len + val.len())
+    } else {
+        let len = write_tagged_varint_to(w, string.len() as u64, false)?;
+        w.write_all(string.as_bytes())?;
+        Ok(len + string.len())
     }
 }

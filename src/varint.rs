@@ -1,4 +1,5 @@
 use crate::Error;
+use std::io::Write;
 
 #[inline]
 pub fn write_varint(buf: &mut Vec<u8>, mut n: u64) -> usize {
@@ -54,4 +55,37 @@ pub fn write_tagged_varint(buf: &mut Vec<u8>, value: u64, tagged: bool) -> usize
         .expect("value too large for tagged varint")
         | (tagged as u64);
     write_varint(buf, tagged)
+}
+
+/// Write a varint to any [`Write`] implementor.
+///
+/// Returns the number of bytes written.
+#[inline]
+pub fn write_varint_to<W: Write>(w: &mut W, mut n: u64) -> std::io::Result<usize> {
+    let mut len = 0;
+    loop {
+        let mut b = (n & 0x7F) as u8;
+        n >>= 7;
+        if n != 0 {
+            b |= 0x80;
+        }
+        w.write_all(&[b])?;
+        len += 1;
+        if n == 0 {
+            break;
+        }
+    }
+    Ok(len)
+}
+
+/// Write a tagged varint to any [`Write`] implementor.
+///
+/// Returns the number of bytes written.
+#[inline]
+pub fn write_tagged_varint_to<W: Write>(w: &mut W, value: u64, tagged: bool) -> std::io::Result<usize> {
+    let tagged = value
+        .checked_shl(1)
+        .expect("value too large for tagged varint")
+        | (tagged as u64);
+    write_varint_to(w, tagged)
 }
