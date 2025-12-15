@@ -282,6 +282,7 @@ impl<'a> Iterator for NoteParser<'a> {
 /// Read exactly `len` bytes from the input slice.
 ///
 /// Returns [`Error::Truncated`] if fewer than `len` bytes remain.
+#[inline]
 fn read_bytes<'a>(len: u64, input: &mut &'a [u8]) -> Result<&'a [u8], Error> {
     let len = len as usize;
     if len > input.len() {
@@ -298,6 +299,7 @@ fn read_bytes<'a>(len: u64, input: &mut &'a [u8]) -> Result<&'a [u8], Error> {
 /// Returns:
 ///  * [`StringType::Str`] if `is_bytes == false`
 ///  * [`StringType::Bytes`] if `is_bytes == true`
+#[inline]
 pub(crate) fn read_string<'a>(input: &mut &'a [u8]) -> Result<StringType<'a>, Error> {
     let (len, is_bytes) = read_tagged_varint(input)?;
     if input.len() < len as usize {

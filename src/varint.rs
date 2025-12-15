@@ -1,5 +1,6 @@
 use crate::Error;
 
+#[inline]
 pub fn write_varint(buf: &mut Vec<u8>, mut n: u64) -> usize {
     let mut len = 0;
     loop {
@@ -17,6 +18,7 @@ pub fn write_varint(buf: &mut Vec<u8>, mut n: u64) -> usize {
     len
 }
 
+#[inline]
 pub fn read_varint(input: &mut &[u8]) -> Result<u64, Error> {
     let mut n = 0u64;
     let mut shift = 0u32;
@@ -39,11 +41,13 @@ pub fn read_varint(input: &mut &[u8]) -> Result<u64, Error> {
     Err(Error::VarintUnterminated)
 }
 
+#[inline]
 pub fn read_tagged_varint(input: &mut &[u8]) -> Result<(u64, bool), Error> {
     let raw = read_varint(input)?;
     Ok((raw >> 1, (raw & 1) != 0))
 }
 
+#[inline]
 pub fn write_tagged_varint(buf: &mut Vec<u8>, value: u64, tagged: bool) -> usize {
     let tagged = value
         .checked_shl(1)
