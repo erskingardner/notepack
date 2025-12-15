@@ -133,5 +133,41 @@ src
 
 MIT — do whatever you want, but attribution is appreciated.
 
+---
+
+## 🧪 Fuzzing
+
+This repo includes a `cargo-fuzz` setup under `fuzz/` with targets that stress the decoder/parser
+with arbitrary event content.
+
+### Install tooling
+
+```bash
+cargo install cargo-fuzz
+rustup toolchain install nightly
+rustup component add llvm-tools-preview --toolchain nightly
+```
+
+### Run fuzzers
+
+```bash
+cd fuzz
+cargo +nightly fuzz run notepack_parser
+```
+
+You can also fuzz Base64 decode/prefix handling:
+
+```bash
+cd fuzz
+cargo +nightly fuzz run notepack_decode_string
+```
+
+And you can fuzz **encoding** (structured `NoteBuf` generation) + encode/decode roundtrips:
+
+```bash
+cd fuzz
+cargo +nightly fuzz run notepack_encoder
+```
+
 [nostrdb]: https://github.com/damus-io/nostrdb
 [nip01]: https://github.com/nostr-protocol/nips/blob/master/01.md#events-and-signatures

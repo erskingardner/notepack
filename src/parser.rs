@@ -392,7 +392,7 @@ impl<'a> Iterator for NoteParser<'a> {
 /// Returns [`Error::Truncated`] if fewer than `len` bytes remain.
 #[inline]
 fn read_bytes<'a>(len: u64, input: &mut &'a [u8]) -> Result<&'a [u8], Error> {
-    let len = len as usize;
+    let len: usize = usize::try_from(len).map_err(|_| Error::VarintOverflow)?;
     if len > input.len() {
         return Err(Error::Truncated);
     }
@@ -410,10 +410,11 @@ fn read_bytes<'a>(len: u64, input: &mut &'a [u8]) -> Result<&'a [u8], Error> {
 #[inline]
 pub(crate) fn read_string<'a>(input: &mut &'a [u8]) -> Result<StringType<'a>, Error> {
     let (len, is_bytes) = read_tagged_varint(input)?;
-    if input.len() < len as usize {
+    let len: usize = usize::try_from(len).map_err(|_| Error::VarintOverflow)?;
+    if input.len() < len {
         return Err(Error::Truncated);
     }
-    let (head, tail) = input.split_at(len as usize);
+    let (head, tail) = input.split_at(len);
     *input = tail;
 
     Ok(if is_bytes {

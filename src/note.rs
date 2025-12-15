@@ -98,11 +98,16 @@ impl<'a> Note<'a> {
     /// assert_eq!(owned.content, "hi");
     /// ```
     pub fn to_owned(&self) -> Result<NoteBuf, Error> {
-        let mut tags_vec: Vec<Vec<String>> = Vec::with_capacity(self.tags.len() as usize);
+        // The tag count is attacker-controlled when parsing arbitrary bytes. Avoid preallocating
+        // absurd amounts by bounding capacity by remaining bytes (each tag requires >=1 byte).
+        let tags_cap = (self.tags.len()).min(self.tags.data.len() as u64) as usize;
+        let mut tags_vec: Vec<Vec<String>> = Vec::with_capacity(tags_cap);
         let mut tags = self.tags.clone();
 
         while let Some(mut elems) = tags.next_tag()? {
-            let mut tag_vec: Vec<String> = Vec::with_capacity(elems.remaining() as usize);
+            // Same idea for tag element count (each element requires >=1 byte).
+            let elems_cap = (elems.remaining).min(elems.cursor.len() as u64) as usize;
+            let mut tag_vec: Vec<String> = Vec::with_capacity(elems_cap);
             for elem in &mut elems {
                 match elem? {
                     StringType::Str(s) => tag_vec.push(s.to_string()),
@@ -148,14 +153,16 @@ impl<'a> Serialize for Note<'a> {
 
         // Materialize tags to Vec<Vec<String>> for JSON.
         // Strings pass through; raw bytes become lowercase hex strings.
-        let mut tags_json: Vec<Vec<String>> = Vec::with_capacity(self.tags.len() as usize);
+        let tags_cap = (self.tags.len()).min(self.tags.data.len() as u64) as usize;
+        let mut tags_json: Vec<Vec<String>> = Vec::with_capacity(tags_cap);
         let mut tags = self.tags.clone(); // don't mutate self
 
         while let Some(mut elems) = tags
             .next_tag()
             .map_err(|e| <S::Error as serde::ser::Error>::custom(e.to_string()))?
         {
-            let mut tag_vec: Vec<String> = Vec::with_capacity(elems.remaining() as usize);
+            let elems_cap = (elems.remaining).min(elems.cursor.len() as u64) as usize;
+            let mut tag_vec: Vec<String> = Vec::with_capacity(elems_cap);
             while let Some(elem) = elems
                 .next()
                 .transpose()
@@ -404,10 +411,11 @@ impl<'a, 'p> TagElems<'a, 'p> {
     pub fn finish(mut self) -> Result<(), Error> {
         while self.remaining > 0 {
             let (len, _is_bytes) = read_tagged_varint(self.cursor)?;
-            if self.cursor.len() < len as usize {
+            let len: usize = usize::try_from(len).map_err(|_| Error::VarintOverflow)?;
+            if self.cursor.len() < len {
                 return Err(Error::Truncated);
             }
-            *self.cursor = &self.cursor[len as usize..];
+            *self.cursor = &self.cursor[len..];
             self.remaining -= 1;
         }
         Ok(())
@@ -445,10 +453,13 @@ impl<'a, 'p> Drop for TagElems<'a, 'p> {
         // If fully drained, do nothing.
         while self.remaining > 0 {
             if let Ok((len, _is_bytes)) = read_tagged_varint(self.cursor) {
-                if self.cursor.len() < len as usize {
+                let Ok(len) = usize::try_from(len) else {
+                    break; // length doesn't fit in usize; can't safely skip
+                };
+                if self.cursor.len() < len {
                     break; // truncated; leave cursor as-is
                 }
-                *self.cursor = &self.cursor[len as usize..];
+                *self.cursor = &self.cursor[len..];
                 self.remaining -= 1;
             } else {
                 break; // malformed; leave cursor as-is

@@ -1,0 +1,29 @@
+[package]
+name = "notepack-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+notepack = { path = ".." }
+
+[[bin]]
+name = "notepack_parser"
+path = "fuzz_targets/notepack_parser.rs"
+
+[[bin]]
+name = "notepack_decode_string"
+path = "fuzz_targets/notepack_decode_string.rs"
+
+[[bin]]
+name = "notepack_encoder"
+path = "fuzz_targets/notepack_encoder.rs"
+
+[profile.release]
+debug = 1
+
+
