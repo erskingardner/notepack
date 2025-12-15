@@ -2,6 +2,10 @@ use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use notepack::{NoteBuf, NoteParser, StringType, pack_note, pack_note_to_string};
 use std::hint::black_box;
 
+#[path = "helpers.rs"]
+mod helpers;
+use helpers::{format_bytes, format_speedup};
+
 const CONTACTS_JSON: &str = include_str!("contacts.json");
 
 fn parse_iter_only(bytes: &[u8]) -> usize {
@@ -188,5 +192,92 @@ fn bench_codec(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_codec);
+/// Print a comparison summary table at the end
+fn print_comparison_table(_c: &mut Criterion) {
+    use std::time::Instant;
+
+    let note: NoteBuf = serde_json::from_str(CONTACTS_JSON).expect("valid");
+    let notepack_bytes = pack_note(&note).expect("ok");
+    let json_str = CONTACTS_JSON;
+
+    let iterations = 100;
+
+    // Measure JSON encode
+    let start = Instant::now();
+    for _ in 0..iterations {
+        black_box(serde_json::to_string(black_box(&note)).expect("ok"));
+    }
+    let json_encode_ns = start.elapsed().as_nanos() / iterations;
+
+    // Measure notepack encode
+    let start = Instant::now();
+    for _ in 0..iterations {
+        black_box(pack_note(black_box(&note)).expect("ok"));
+    }
+    let np_encode_ns = start.elapsed().as_nanos() / iterations;
+
+    // Measure JSON decode
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let n: NoteBuf = serde_json::from_str(black_box(json_str)).expect("ok");
+        black_box(n);
+    }
+    let json_decode_ns = start.elapsed().as_nanos() / iterations;
+
+    // Measure notepack decode (into_note, lazy)
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let parsed = NoteParser::new(black_box(&notepack_bytes)).into_note().expect("ok");
+        black_box(parsed);
+    }
+    let np_decode_ns = start.elapsed().as_nanos() / iterations;
+
+    // Measure notepack decode full (with tag iteration)
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let parsed = NoteParser::new(black_box(&notepack_bytes)).into_note().expect("ok");
+        let mut tags = parsed.tags;
+        while let Some(mut elems) = tags.next_tag().expect("ok") {
+            for item in &mut elems {
+                black_box(item.expect("ok"));
+            }
+        }
+    }
+    let np_decode_full_ns = start.elapsed().as_nanos() / iterations;
+
+    let json_bytes = json_str.len();
+    let np_bytes = notepack_bytes.len();
+    let compression = 100.0 * (1.0 - (np_bytes as f64 / json_bytes as f64));
+
+    // Print table
+    eprintln!("\n");
+    eprintln!("╔══════════════════════════════════════════════════════════════════╗");
+    eprintln!("║           NOTEPACK vs JSON COMPARISON (contacts.json)            ║");
+    eprintln!("╠══════════════════════════════════════════════════════════════════╣");
+    eprintln!("║  Operation          │    JSON     │  notepack   │   Speedup     ║");
+    eprintln!("╠══════════════════════════════════════════════════════════════════╣");
+    eprintln!(
+        "║  Encode             │ {:>7} ns  │ {:>7} ns  │  {} ║",
+        json_encode_ns, np_encode_ns, format_speedup(json_encode_ns, np_encode_ns)
+    );
+    eprintln!(
+        "║  Decode             │ {:>7} ns  │ {:>7} ns  │  {} ║",
+        json_decode_ns, np_decode_ns, format_speedup(json_decode_ns, np_decode_ns)
+    );
+    eprintln!(
+        "║  Decode (full)      │ {:>7} ns  │ {:>7} ns  │  {} ║",
+        json_decode_ns, np_decode_full_ns, format_speedup(json_decode_ns, np_decode_full_ns)
+    );
+    eprintln!("╠══════════════════════════════════════════════════════════════════╣");
+    eprintln!(
+        "║  Event size         │ {:>9}  │ {:>9}  │  {:>4.1}% smaller ║",
+        format_bytes(json_bytes),
+        format_bytes(np_bytes),
+        compression
+    );
+    eprintln!("╚══════════════════════════════════════════════════════════════════╝");
+    eprintln!();
+}
+
+criterion_group!(benches, bench_codec, print_comparison_table);
 criterion_main!(benches);
