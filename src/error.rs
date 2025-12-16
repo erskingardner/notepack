@@ -56,7 +56,7 @@ pub enum Error {
     /// The notepack version is not supported by this decoder.
     ///
     /// Currently only version 1 is supported.
-    UnsupportedVersion(u8),
+    UnsupportedVersion(u64),
 
     /// Extra bytes were found after the complete notepack payload.
     ///
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn display_unsupported_version() {
-        let err = Error::UnsupportedVersion(2);
+        let err = Error::UnsupportedVersion(2u64);
         assert_eq!(
             err.to_string(),
             "unsupported notepack version: 2 (only version 1 is supported)"
@@ -397,7 +397,7 @@ mod tests {
         assert!(Error::Truncated.source().is_none());
         assert!(Error::VarintOverflow.source().is_none());
         assert!(Error::InvalidPrefix.source().is_none());
-        assert!(Error::UnsupportedVersion(1).source().is_none());
+            assert!(Error::UnsupportedVersion(1u64).source().is_none());
         assert!(Error::TrailingBytes.source().is_none());
         assert!(Error::TaggedVarintOverflow.source().is_none());
     }

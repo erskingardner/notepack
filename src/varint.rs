@@ -42,6 +42,13 @@ pub fn read_varint(input: &mut &[u8]) -> Result<u64, Error> {
     for i in 0..input.len() {
         let b = input[i];
         let chunk = (b & 0x7F) as u64;
+
+        // On the 10th byte (shift == 63), only bit 0 can contribute to a valid u64.
+        // Bits 1-6 would overflow into bits 64-69 which don't exist.
+        if shift == 63 && (chunk & 0x7E) != 0 {
+            return Err(Error::VarintOverflow);
+        }
+
         n |= chunk << shift;
 
         if b & 0x80 == 0 {
@@ -278,6 +285,47 @@ mod tests {
         // 10 bytes with continuation bits would overflow u64
         // After 9 bytes we've consumed 63 bits, 10th byte would push shift to 70
         let mut slice: &[u8] = &[0x80; 11]; // 11 continuation bytes
+        let err = read_varint(&mut slice).unwrap_err();
+        assert!(matches!(err, Error::VarintOverflow));
+    }
+
+    #[test]
+    fn varint_overflow_invalid_bits_in_10th_byte() {
+        // A 10-byte varint where the 10th byte has bits 1-6 set.
+        // These bits would overflow u64 (they'd need to go into bits 64-69).
+        // Format: 9 continuation bytes + 1 terminator with invalid upper bits
+        let mut bytes = [0x80u8; 10];
+        bytes[9] = 0x7F; // bits 0-6 set, no continuation (would be 0x7F << 63, overflow)
+        let mut slice: &[u8] = &bytes;
+        let err = read_varint(&mut slice).unwrap_err();
+        assert!(matches!(err, Error::VarintOverflow));
+    }
+
+    #[test]
+    fn varint_10_bytes_with_valid_bit0_only() {
+        // A valid 10-byte varint: u64::MAX requires exactly 10 bytes.
+        // The 10th byte should have only bit 0 set (0x01).
+        // u64::MAX = 0xFFFF_FFFF_FFFF_FFFF
+        let mut buf = Vec::new();
+        write_varint(&mut buf, u64::MAX);
+        assert_eq!(buf.len(), 10);
+        // Verify the 10th byte has only bit 0 set (value 0x01)
+        assert_eq!(buf[9], 0x01);
+
+        let mut slice = buf.as_slice();
+        let val = read_varint(&mut slice).unwrap();
+        assert_eq!(val, u64::MAX);
+    }
+
+    #[test]
+    fn varint_10_bytes_with_bit1_set_is_invalid() {
+        // Construct a 10-byte varint where byte 10 has bit 1 set (0x02).
+        // This would represent bits 64-65 being set, which overflows u64.
+        let mut buf = Vec::new();
+        write_varint(&mut buf, u64::MAX);
+        buf[9] = 0x03; // bits 0 AND 1 set - bit 1 is invalid
+
+        let mut slice = buf.as_slice();
         let err = read_varint(&mut slice).unwrap_err();
         assert!(matches!(err, Error::VarintOverflow));
     }

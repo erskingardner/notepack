@@ -219,7 +219,7 @@ notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAERERERERERERERERERERERERERE
 
 To prevent denial-of-service attacks from maliciously crafted payloads, decoders SHOULD enforce reasonable size limits:
 
-* **Maximum allocation size:** 128 KB (131,072 bytes) is recommended for any single allocation (content, tag element, etc.).
+* **Maximum allocation size:** 256 KB (262,144 bytes) is recommended for any single allocation (content, tag element, etc.).
 * **Maximum tag count:** Implementations MAY limit the number of tags to prevent excessive memory usage.
 * **Maximum tag element count:** Implementations MAY limit elements per tag similarly.
 

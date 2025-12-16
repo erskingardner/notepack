@@ -198,8 +198,8 @@ impl<'a> NoteParser<'a> {
     /// ```
     pub fn into_note(mut self) -> Result<Note<'a>, Error> {
         // version - must be 1
-        let version = read_varint(&mut self.data)? as u8;
-        if version != SUPPORTED_VERSION {
+        let version = read_varint(&mut self.data)?;
+        if version != SUPPORTED_VERSION as u64 {
             return Err(Error::UnsupportedVersion(version));
         }
 
@@ -267,8 +267,8 @@ impl<'a> NoteParser<'a> {
     /// ```
     pub fn into_note_strict(mut self) -> Result<Note<'a>, Error> {
         // version - must be 1
-        let version = read_varint(&mut self.data)? as u8;
-        if version != SUPPORTED_VERSION {
+        let version = read_varint(&mut self.data)?;
+        if version != SUPPORTED_VERSION as u64 {
             return Err(Error::UnsupportedVersion(version));
         }
 
@@ -292,16 +292,14 @@ impl<'a> NoteParser<'a> {
         let content_bytes = read_bytes(content_len, &mut self.data)?;
         let content = std::str::from_utf8(content_bytes)?;
 
-        // Parse tags, advancing self.data past the num_tags varint.
-        // After this, self.data points to the first tag's num_elems (or end if no tags).
+        // Parse tags: Tags::parse reads num_tags and positions itself at the first tag's data.
+        // We then iterate using self.data (which shares the same position) to verify completeness,
+        // while tags retains its position for the caller to iterate later.
         let tags = Tags::parse(&mut self.data)?;
 
-        // Iterate all tags using self.data directly to track consumption.
-        // This allows us to verify no trailing bytes remain.
+        // Iterate all tags using self.data to verify no trailing bytes remain.
         for _ in 0..tags.len() {
-            // Read num_elems for this tag
             let num_elems = read_varint(&mut self.data)?;
-            // Skip all elements
             for _ in 0..num_elems {
                 let _ = read_string(&mut self.data)?;
             }
@@ -422,9 +420,11 @@ impl<'a> Iterator for NoteParser<'a> {
 
         let item = match self.state {
             Start => {
-                let version = read_or_err!(read_varint(&mut self.data)) as u8;
+                let version = read_or_err!(read_varint(&mut self.data));
+                // Note: We don't validate version here - the iterator yields all fields
+                // and leaves validation to the consumer. Use into_note() for validation.
                 self.state = AfterVersion;
-                Ok(ParsedField::Version(version))
+                Ok(ParsedField::Version(version as u8))
             }
             AfterVersion => {
                 let id = read_or_err!(read_bytes(32, &mut self.data));
@@ -762,7 +762,7 @@ mod into_note_tests {
         write_varint(&mut bytes, 0); // num_tags
 
         let result = NoteParser::new(&bytes).into_note();
-        assert!(matches!(result, Err(Error::UnsupportedVersion(2))));
+        assert!(matches!(result, Err(Error::UnsupportedVersion(2))), "expected UnsupportedVersion(2), got {:?}", result);
     }
 
     #[test]
@@ -782,7 +782,29 @@ mod into_note_tests {
         write_varint(&mut bytes, 0);
 
         let result = NoteParser::new(&bytes).into_note();
-        assert!(matches!(result, Err(Error::UnsupportedVersion(0))));
+        assert!(matches!(result, Err(Error::UnsupportedVersion(0))), "expected UnsupportedVersion(0), got {:?}", result);
+    }
+
+    #[test]
+    fn into_note_rejects_version_257_not_truncated_to_1() {
+        // Regression test: version 257 should NOT be accepted as version 1
+        // (257 % 256 == 1, so a truncation bug would accept it)
+        let id = [0x11; 32];
+        let pk = [0x22; 32];
+        let sig = [0x33; 64];
+
+        let mut bytes = Vec::new();
+        write_varint(&mut bytes, 257); // version 257 (would truncate to 1 if cast to u8)
+        bytes.extend_from_slice(&id);
+        bytes.extend_from_slice(&pk);
+        bytes.extend_from_slice(&sig);
+        write_varint(&mut bytes, 1234);
+        write_varint(&mut bytes, 1);
+        write_varint(&mut bytes, 0);
+        write_varint(&mut bytes, 0);
+
+        let result = NoteParser::new(&bytes).into_note();
+        assert!(matches!(result, Err(Error::UnsupportedVersion(257))), "expected UnsupportedVersion(257), got {:?}", result);
     }
 
     #[test]

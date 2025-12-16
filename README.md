@@ -60,16 +60,16 @@ For large contact lists, you can crunch them down from 74kb to about 36kb.
 ### Encoding
 
 ```rust
-use notepack::{Note, pack_note_to_string};
+use notepack::{NoteBuf, pack_note_to_string};
 
-let note = Note {
+let note = NoteBuf {
     id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
     pubkey: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
     created_at: 1753898766,
     kind: 1,
     tags: vec![vec!["tag".into(), "value".into()]],
     content: "Hello, world!".into(),
-    sig: "cccc...".into(),
+    sig: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into(),
 };
 
 let encoded = pack_note_to_string(&note).unwrap();
