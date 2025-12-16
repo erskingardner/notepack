@@ -29,3 +29,7 @@ harness = false
 [[bench]]
 name = "by_kind"
 harness = false
+
+[[example]]
+name = "roundtrip_sample"
+path = "examples/roundtrip_sample.rs"

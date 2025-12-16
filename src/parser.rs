@@ -3,8 +3,8 @@ use crate::stringtype::StringType;
 use crate::varint::{read_tagged_varint, read_varint};
 use crate::{Note, Tags};
 
-/// Maximum allocation size (128 KB) to prevent OOM from malicious payloads.
-pub const MAX_ALLOCATION_SIZE: u64 = 128 * 1024;
+/// Maximum allocation size (256 KB) to prevent OOM from malicious payloads.
+pub const MAX_ALLOCATION_SIZE: u64 = 256 * 1024;
 
 /// The currently supported notepack format version.
 pub const SUPPORTED_VERSION: u8 = 1;
