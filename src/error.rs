@@ -125,7 +125,10 @@ impl core::fmt::Display for Error {
                 write!(f, "io error: {err}")
             }
             Error::UnsupportedVersion(v) => {
-                write!(f, "unsupported notepack version: {v} (only version 1 is supported)")
+                write!(
+                    f,
+                    "unsupported notepack version: {v} (only version 1 is supported)"
+                )
             }
             Error::TrailingBytes => {
                 write!(f, "trailing bytes after notepack payload")
@@ -397,7 +400,7 @@ mod tests {
         assert!(Error::Truncated.source().is_none());
         assert!(Error::VarintOverflow.source().is_none());
         assert!(Error::InvalidPrefix.source().is_none());
-            assert!(Error::UnsupportedVersion(1u64).source().is_none());
+        assert!(Error::UnsupportedVersion(1u64).source().is_none());
         assert!(Error::TrailingBytes.source().is_none());
         assert!(Error::TaggedVarintOverflow.source().is_none());
     }

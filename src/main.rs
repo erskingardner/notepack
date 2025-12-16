@@ -1,4 +1,6 @@
-use notepack::{Error, NoteBuf, NoteParser, ParsedField, StringType, pack_note_to_string, MAX_ALLOCATION_SIZE};
+use notepack::{
+    Error, MAX_ALLOCATION_SIZE, NoteBuf, NoteParser, ParsedField, StringType, pack_note_to_string,
+};
 use std::io;
 
 fn main() -> Result<(), Error> {

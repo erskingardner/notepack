@@ -83,9 +83,7 @@ pub fn read_tagged_varint(input: &mut &[u8]) -> Result<(u64, bool), Error> {
 /// Returns [`Error::TaggedVarintOverflow`] if `value >= 2^63` (cannot be shifted left).
 #[inline]
 pub fn write_tagged_varint(buf: &mut Vec<u8>, value: u64, tagged: bool) -> Result<usize, Error> {
-    let shifted = value
-        .checked_shl(1)
-        .ok_or(Error::TaggedVarintOverflow)?;
+    let shifted = value.checked_shl(1).ok_or(Error::TaggedVarintOverflow)?;
     // Also check that the high bit wasn't set (which would wrap to 0)
     if value >= (1u64 << 63) {
         return Err(Error::TaggedVarintOverflow);
@@ -129,9 +127,7 @@ pub fn write_tagged_varint_to<W: Write>(
     value: u64,
     tagged: bool,
 ) -> Result<usize, Error> {
-    let shifted = value
-        .checked_shl(1)
-        .ok_or(Error::TaggedVarintOverflow)?;
+    let shifted = value.checked_shl(1).ok_or(Error::TaggedVarintOverflow)?;
     // Also check that the high bit wasn't set (which would wrap to 0)
     if value >= (1u64 << 63) {
         return Err(Error::TaggedVarintOverflow);

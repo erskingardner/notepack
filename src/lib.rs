@@ -87,11 +87,39 @@ mod varint;
 
 pub use error::Error;
 pub use note::{Note, NoteBuf, TagElems, Tags};
-pub use parser::{NoteParser, ParsedField, ParserState, MAX_ALLOCATION_SIZE, SUPPORTED_VERSION};
+pub use parser::{MAX_ALLOCATION_SIZE, NoteParser, ParsedField, ParserState, SUPPORTED_VERSION};
 pub use stringtype::StringType;
 
 use std::io::Write;
 use varint::{write_tagged_varint, write_tagged_varint_to, write_varint, write_varint_to};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hex encoding/decoding lookup tables for performance
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Lookup table for decoding lowercase hex nibbles.
+/// Invalid bytes (non-hex or uppercase) map to 0xFF.
+const HEX_DECODE_LUT: [u8; 256] = {
+    let mut t = [0xFFu8; 256];
+    t[b'0' as usize] = 0;
+    t[b'1' as usize] = 1;
+    t[b'2' as usize] = 2;
+    t[b'3' as usize] = 3;
+    t[b'4' as usize] = 4;
+    t[b'5' as usize] = 5;
+    t[b'6' as usize] = 6;
+    t[b'7' as usize] = 7;
+    t[b'8' as usize] = 8;
+    t[b'9' as usize] = 9;
+    t[b'a' as usize] = 10;
+    t[b'b' as usize] = 11;
+    t[b'c' as usize] = 12;
+    t[b'd' as usize] = 13;
+    t[b'e' as usize] = 14;
+    t[b'f' as usize] = 15;
+    // Note: A-F intentionally NOT mapped - we only accept lowercase for round-trip stability
+    t
+};
 
 /// Packs a [`NoteBuf`] into an existing buffer, appending the binary payload.
 ///
@@ -373,38 +401,28 @@ fn base64_encode(bs: &[u8]) -> String {
 /// Only lowercase hex is accepted to ensure round-trip encoding works correctly.
 /// Uppercase hex or odd-length strings return an error.
 #[cfg(test)]
-fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, HexDecodeError> {
+fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, &'static str> {
     let bytes = input.as_bytes();
 
     // Reject odd-length hex strings
     if !bytes.len().is_multiple_of(2) {
-        return Err(HexDecodeError);
+        return Err("odd length");
     }
 
     let mut out = Vec::with_capacity(bytes.len() / 2);
     for i in (0..bytes.len()).step_by(2) {
-        let hi = decode_lower_hex_nibble(bytes[i])?;
-        let lo = decode_lower_hex_nibble(bytes[i + 1])?;
+        let hi = HEX_DECODE_LUT[bytes[i] as usize];
+        let lo = HEX_DECODE_LUT[bytes[i + 1] as usize];
+
+        // 0xFF indicates invalid hex character
+        if (hi | lo) > 0x0F {
+            return Err("invalid hex");
+        }
+
         out.push((hi << 4) | lo);
     }
 
     Ok(out)
-}
-
-/// Errors returned when lowercase hex decoding fails in internal functions.
-/// These are distinct from hex_simd errors and indicate non-lowercase hex.
-#[derive(Debug)]
-struct HexDecodeError;
-
-#[inline]
-fn decode_lower_hex_nibble(b: u8) -> Result<u8, HexDecodeError> {
-    match b {
-        b'0'..=b'9' => Ok(b - b'0'),
-        b'a'..=b'f' => Ok(b - b'a' + 10),
-        // Uppercase must be rejected for round-trip stability.
-        b'A'..=b'F' => Err(HexDecodeError),
-        _ => Err(HexDecodeError),
-    }
 }
 
 /// Write a tag element string to a buffer.
@@ -431,6 +449,8 @@ fn write_string(buf: &mut Vec<u8>, string: &str) -> Result<(), Error> {
 #[inline]
 fn try_write_compacted_hex(buf: &mut Vec<u8>, string: &str) -> Result<bool, Error> {
     let s = string.as_bytes();
+
+    // Must be even length for hex
     if !s.len().is_multiple_of(2) {
         return Ok(false);
     }
@@ -442,21 +462,17 @@ fn try_write_compacted_hex(buf: &mut Vec<u8>, string: &str) -> Result<bool, Erro
     write_tagged_varint(buf, nbytes as u64, true)?;
     buf.reserve(nbytes);
 
+    // Decode using lookup table for faster hex decoding
     for i in 0..nbytes {
-        let hi = match decode_lower_hex_nibble(s[i * 2]) {
-            Ok(v) => v,
-            Err(_) => {
-                buf.truncate(start);
-                return Ok(false);
-            }
-        };
-        let lo = match decode_lower_hex_nibble(s[i * 2 + 1]) {
-            Ok(v) => v,
-            Err(_) => {
-                buf.truncate(start);
-                return Ok(false);
-            }
-        };
+        let hi = HEX_DECODE_LUT[s[i * 2] as usize];
+        let lo = HEX_DECODE_LUT[s[i * 2 + 1] as usize];
+
+        // Valid nibbles are 0-15; 0xFF indicates invalid hex
+        if (hi | lo) > 0x0F {
+            buf.truncate(start);
+            return Ok(false);
+        }
+
         buf.push((hi << 4) | lo);
     }
 
@@ -472,25 +488,30 @@ fn write_string_to<W: Write>(w: &mut W, string: &str) -> Result<usize, Error> {
         return write_tagged_varint_to(w, 0, false);
     }
 
-    if let Some(nbytes) = try_decode_lower_hex_len(string.as_bytes()) {
+    let s = string.as_bytes();
+
+    // Must be even length for hex
+    if s.len().is_multiple_of(2) {
+        let nbytes = s.len() / 2;
+
         // Fast paths for the most common sizes (32/64 bytes) without heap allocation.
         if nbytes == 32 {
             let mut out = [0u8; 32];
-            if decode_lower_hex_into(string.as_bytes(), &mut out) {
+            if decode_lower_hex_into(s, &mut out) {
                 let len = write_tagged_varint_to(w, 32, true)?;
                 w.write_all(&out)?;
                 return Ok(len + out.len());
             }
         } else if nbytes == 64 {
             let mut out = [0u8; 64];
-            if decode_lower_hex_into(string.as_bytes(), &mut out) {
+            if decode_lower_hex_into(s, &mut out) {
                 let len = write_tagged_varint_to(w, 64, true)?;
                 w.write_all(&out)?;
                 return Ok(len + out.len());
             }
         } else {
             let mut out = Vec::with_capacity(nbytes);
-            if decode_lower_hex_into_vec(string.as_bytes(), &mut out) {
+            if decode_lower_hex_into_vec(s, &mut out) {
                 let len = write_tagged_varint_to(w, nbytes as u64, true)?;
                 w.write_all(&out)?;
                 return Ok(len + out.len());
@@ -503,34 +524,27 @@ fn write_string_to<W: Write>(w: &mut W, string: &str) -> Result<usize, Error> {
     Ok(len + string.len())
 }
 
-#[inline]
-fn try_decode_lower_hex_len(bytes: &[u8]) -> Option<usize> {
-    if bytes.len().is_multiple_of(2) {
-        Some(bytes.len() / 2)
-    } else {
-        None
-    }
-}
-
+/// Decode lowercase hex bytes into a fixed-size array using the lookup table.
 #[inline]
 fn decode_lower_hex_into<const N: usize>(bytes: &[u8], out: &mut [u8; N]) -> bool {
     if bytes.len() != (N * 2) {
         return false;
     }
     for i in 0..N {
-        let hi = match decode_lower_hex_nibble(bytes[i * 2]) {
-            Ok(v) => v,
-            Err(_) => return false,
-        };
-        let lo = match decode_lower_hex_nibble(bytes[i * 2 + 1]) {
-            Ok(v) => v,
-            Err(_) => return false,
-        };
+        let hi = HEX_DECODE_LUT[bytes[i * 2] as usize];
+        let lo = HEX_DECODE_LUT[bytes[i * 2 + 1] as usize];
+
+        // Valid nibbles are 0-15; 0xFF indicates invalid
+        if (hi | lo) > 0x0F {
+            return false;
+        }
+
         out[i] = (hi << 4) | lo;
     }
     true
 }
 
+/// Decode lowercase hex bytes into a Vec using the lookup table.
 #[inline]
 fn decode_lower_hex_into_vec(bytes: &[u8], out: &mut Vec<u8>) -> bool {
     if !bytes.len().is_multiple_of(2) {
@@ -540,14 +554,14 @@ fn decode_lower_hex_into_vec(bytes: &[u8], out: &mut Vec<u8>) -> bool {
     out.clear();
     out.reserve(n);
     for i in 0..n {
-        let hi = match decode_lower_hex_nibble(bytes[i * 2]) {
-            Ok(v) => v,
-            Err(_) => return false,
-        };
-        let lo = match decode_lower_hex_nibble(bytes[i * 2 + 1]) {
-            Ok(v) => v,
-            Err(_) => return false,
-        };
+        let hi = HEX_DECODE_LUT[bytes[i * 2] as usize];
+        let lo = HEX_DECODE_LUT[bytes[i * 2 + 1] as usize];
+
+        // Valid nibbles are 0-15; 0xFF indicates invalid
+        if (hi | lo) > 0x0F {
+            return false;
+        }
+
         out.push((hi << 4) | lo);
     }
     true
@@ -879,7 +893,11 @@ mod tests {
         note.id = "aabb".into(); // Only 2 bytes, need 32
         let err = pack_note(&note).unwrap_err();
         match err {
-            Error::InvalidFieldLength { field, expected, actual } => {
+            Error::InvalidFieldLength {
+                field,
+                expected,
+                actual,
+            } => {
                 assert_eq!(field, "id");
                 assert_eq!(expected, 32);
                 assert_eq!(actual, 2);
@@ -894,7 +912,11 @@ mod tests {
         note.id = "aa".repeat(33); // 33 bytes, need 32
         let err = pack_note(&note).unwrap_err();
         match err {
-            Error::InvalidFieldLength { field, expected, actual } => {
+            Error::InvalidFieldLength {
+                field,
+                expected,
+                actual,
+            } => {
                 assert_eq!(field, "id");
                 assert_eq!(expected, 32);
                 assert_eq!(actual, 33);
@@ -909,7 +931,11 @@ mod tests {
         note.pubkey = "bb".repeat(16); // 16 bytes, need 32
         let err = pack_note(&note).unwrap_err();
         match err {
-            Error::InvalidFieldLength { field, expected, actual } => {
+            Error::InvalidFieldLength {
+                field,
+                expected,
+                actual,
+            } => {
                 assert_eq!(field, "pubkey");
                 assert_eq!(expected, 32);
                 assert_eq!(actual, 16);
@@ -924,7 +950,11 @@ mod tests {
         note.sig = "cc".repeat(32); // 32 bytes, need 64
         let err = pack_note(&note).unwrap_err();
         match err {
-            Error::InvalidFieldLength { field, expected, actual } => {
+            Error::InvalidFieldLength {
+                field,
+                expected,
+                actual,
+            } => {
                 assert_eq!(field, "sig");
                 assert_eq!(expected, 64);
                 assert_eq!(actual, 32);

@@ -7,7 +7,7 @@
 //!
 //! Run with: `cargo run --example roundtrip_sample`
 
-use notepack::{Error, NoteBuf, NoteParser, pack_note, MAX_ALLOCATION_SIZE};
+use notepack::{Error, MAX_ALLOCATION_SIZE, NoteBuf, NoteParser, pack_note};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -95,43 +95,50 @@ fn main() {
 
         // Verify roundtrip
         assert_eq!(
-            note.id, recovered.id,
+            note.id,
+            recovered.id,
             "ID mismatch at line {} (kind {})",
             line_num + 1,
             note.kind
         );
         assert_eq!(
-            note.pubkey, recovered.pubkey,
+            note.pubkey,
+            recovered.pubkey,
             "Pubkey mismatch at line {} (kind {})",
             line_num + 1,
             note.kind
         );
         assert_eq!(
-            note.sig, recovered.sig,
+            note.sig,
+            recovered.sig,
             "Sig mismatch at line {} (kind {})",
             line_num + 1,
             note.kind
         );
         assert_eq!(
-            note.created_at, recovered.created_at,
+            note.created_at,
+            recovered.created_at,
             "Timestamp mismatch at line {} (kind {})",
             line_num + 1,
             note.kind
         );
         assert_eq!(
-            note.kind, recovered.kind,
+            note.kind,
+            recovered.kind,
             "Kind mismatch at line {} (kind {})",
             line_num + 1,
             note.kind
         );
         assert_eq!(
-            note.content, recovered.content,
+            note.content,
+            recovered.content,
             "Content mismatch at line {} (kind {})",
             line_num + 1,
             note.kind
         );
         assert_eq!(
-            note.tags, recovered.tags,
+            note.tags,
+            recovered.tags,
             "Tags mismatch at line {} (kind {})",
             line_num + 1,
             note.kind
@@ -192,4 +199,3 @@ fn main() {
     println!("  Time:     {:>10.2?}", elapsed);
     println!("  Rate:     {:>10.0} events/sec", events_per_sec);
 }
-

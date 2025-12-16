@@ -762,7 +762,11 @@ mod into_note_tests {
         write_varint(&mut bytes, 0); // num_tags
 
         let result = NoteParser::new(&bytes).into_note();
-        assert!(matches!(result, Err(Error::UnsupportedVersion(2))), "expected UnsupportedVersion(2), got {:?}", result);
+        assert!(
+            matches!(result, Err(Error::UnsupportedVersion(2))),
+            "expected UnsupportedVersion(2), got {:?}",
+            result
+        );
     }
 
     #[test]
@@ -782,7 +786,11 @@ mod into_note_tests {
         write_varint(&mut bytes, 0);
 
         let result = NoteParser::new(&bytes).into_note();
-        assert!(matches!(result, Err(Error::UnsupportedVersion(0))), "expected UnsupportedVersion(0), got {:?}", result);
+        assert!(
+            matches!(result, Err(Error::UnsupportedVersion(0))),
+            "expected UnsupportedVersion(0), got {:?}",
+            result
+        );
     }
 
     #[test]
@@ -804,7 +812,11 @@ mod into_note_tests {
         write_varint(&mut bytes, 0);
 
         let result = NoteParser::new(&bytes).into_note();
-        assert!(matches!(result, Err(Error::UnsupportedVersion(257))), "expected UnsupportedVersion(257), got {:?}", result);
+        assert!(
+            matches!(result, Err(Error::UnsupportedVersion(257))),
+            "expected UnsupportedVersion(257), got {:?}",
+            result
+        );
     }
 
     #[test]
@@ -846,7 +858,9 @@ mod into_note_tests {
         bytes.extend_from_slice(b"hi"); // content
         write_varint(&mut bytes, 0); // num_tags
 
-        let note = NoteParser::new(&bytes).into_note_strict().expect("should succeed");
+        let note = NoteParser::new(&bytes)
+            .into_note_strict()
+            .expect("should succeed");
         assert_eq!(note.content, "hi");
     }
 
@@ -867,10 +881,7 @@ mod into_note_tests {
         // No actual content bytes
 
         let result = NoteParser::new(&bytes).into_note();
-        assert!(matches!(
-            result,
-            Err(Error::AllocationLimitExceeded { .. })
-        ));
+        assert!(matches!(result, Err(Error::AllocationLimitExceeded { .. })));
     }
 }
 
