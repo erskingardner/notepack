@@ -39,7 +39,7 @@ pub enum Error {
     ///
     /// This can occur if the hex contains invalid characters, is an odd length,
     /// or contains uppercase letters (only lowercase hex is valid for round-tripping).
-    FromHex,
+    FromHex(hex_simd::Error),
 
     /// Failed to decode the Base64 portion of a `notepack_...` string.
     Decode(base64::DecodeError),
@@ -52,6 +52,46 @@ pub enum Error {
 
     /// An I/O error occurred during writing.
     Io(std::io::Error),
+
+    /// The notepack version is not supported by this decoder.
+    ///
+    /// Currently only version 1 is supported.
+    UnsupportedVersion(u8),
+
+    /// Extra bytes were found after the complete notepack payload.
+    ///
+    /// Per the spec, decoders must stop exactly at the end of the payload.
+    TrailingBytes,
+
+    /// A fixed-size field (id, pubkey, or sig) had an invalid length.
+    ///
+    /// `id` and `pubkey` must be exactly 32 bytes (64 hex chars),
+    /// `sig` must be exactly 64 bytes (128 hex chars).
+    InvalidFieldLength {
+        /// The name of the field that had an invalid length.
+        field: &'static str,
+        /// The expected length in bytes.
+        expected: usize,
+        /// The actual length in bytes.
+        actual: usize,
+    },
+
+    /// A value is too large for tagged varint encoding.
+    ///
+    /// Tagged varints shift the value left by 1, so the maximum supported
+    /// value is `2^63 - 1`.
+    TaggedVarintOverflow,
+
+    /// An allocation size exceeded the maximum allowed limit.
+    ///
+    /// This prevents denial-of-service attacks via maliciously crafted
+    /// payloads claiming huge sizes.
+    AllocationLimitExceeded {
+        /// The requested allocation size.
+        requested: u64,
+        /// The maximum allowed size.
+        limit: u64,
+    },
 }
 
 impl core::fmt::Display for Error {
@@ -69,8 +109,8 @@ impl core::fmt::Display for Error {
             Error::Utf8(err) => {
                 write!(f, "utf8 error: {err}")
             }
-            Error::FromHex => {
-                write!(f, "error when converting from hex")
+            Error::FromHex(err) => {
+                write!(f, "hex decode error: {err}")
             }
             Error::Decode(err) => {
                 write!(f, "base64 decode err: {err}")
@@ -83,6 +123,31 @@ impl core::fmt::Display for Error {
             }
             Error::Io(err) => {
                 write!(f, "io error: {err}")
+            }
+            Error::UnsupportedVersion(v) => {
+                write!(f, "unsupported notepack version: {v} (only version 1 is supported)")
+            }
+            Error::TrailingBytes => {
+                write!(f, "trailing bytes after notepack payload")
+            }
+            Error::InvalidFieldLength {
+                field,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "invalid {field} length: expected {expected} bytes, got {actual}"
+                )
+            }
+            Error::TaggedVarintOverflow => {
+                write!(f, "value too large for tagged varint (max 2^63 - 1)")
+            }
+            Error::AllocationLimitExceeded { requested, limit } => {
+                write!(
+                    f,
+                    "allocation limit exceeded: requested {requested} bytes, limit is {limit}"
+                )
             }
         }
     }
@@ -101,8 +166,8 @@ impl From<base64::DecodeError> for Error {
 }
 
 impl From<hex_simd::Error> for Error {
-    fn from(_err: hex_simd::Error) -> Self {
-        Error::FromHex
+    fn from(err: hex_simd::Error) -> Self {
+        Error::FromHex(err)
     }
 }
 
@@ -118,7 +183,18 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Utf8(err) => Some(err),
+            Error::FromHex(err) => Some(err),
+            Error::Decode(err) => Some(err),
+            Error::Json(err) => Some(err),
+            Error::Io(err) => Some(err),
+            _ => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -148,8 +224,9 @@ mod tests {
 
     #[test]
     fn display_from_hex() {
-        let err = Error::FromHex;
-        assert_eq!(err.to_string(), "error when converting from hex");
+        let hex_err = hex_simd::decode_to_vec("zz").unwrap_err();
+        let err = Error::FromHex(hex_err);
+        assert!(err.to_string().starts_with("hex decode error:"));
     }
 
     #[test]
@@ -189,6 +266,55 @@ mod tests {
         assert!(err.to_string().starts_with("io error:"));
     }
 
+    #[test]
+    fn display_unsupported_version() {
+        let err = Error::UnsupportedVersion(2);
+        assert_eq!(
+            err.to_string(),
+            "unsupported notepack version: 2 (only version 1 is supported)"
+        );
+    }
+
+    #[test]
+    fn display_trailing_bytes() {
+        let err = Error::TrailingBytes;
+        assert_eq!(err.to_string(), "trailing bytes after notepack payload");
+    }
+
+    #[test]
+    fn display_invalid_field_length() {
+        let err = Error::InvalidFieldLength {
+            field: "id",
+            expected: 32,
+            actual: 16,
+        };
+        assert_eq!(
+            err.to_string(),
+            "invalid id length: expected 32 bytes, got 16"
+        );
+    }
+
+    #[test]
+    fn display_tagged_varint_overflow() {
+        let err = Error::TaggedVarintOverflow;
+        assert_eq!(
+            err.to_string(),
+            "value too large for tagged varint (max 2^63 - 1)"
+        );
+    }
+
+    #[test]
+    fn display_allocation_limit_exceeded() {
+        let err = Error::AllocationLimitExceeded {
+            requested: 1_000_000,
+            limit: 131_072,
+        };
+        assert_eq!(
+            err.to_string(),
+            "allocation limit exceeded: requested 1000000 bytes, limit is 131072"
+        );
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // From trait tests
     // ─────────────────────────────────────────────────────────────────────────────
@@ -214,7 +340,7 @@ mod tests {
     fn from_hex_simd_error() {
         let hex_err = hex_simd::decode_to_vec("zz").unwrap_err();
         let err: Error = hex_err.into();
-        assert!(matches!(err, Error::FromHex));
+        assert!(matches!(err, Error::FromHex(_)));
     }
 
     #[test]
@@ -246,5 +372,33 @@ mod tests {
         let err = Error::Truncated;
         let debug_str = format!("{:?}", err);
         assert_eq!(debug_str, "Truncated");
+    }
+
+    #[test]
+    fn error_source_utf8() {
+        use std::error::Error as StdError;
+        let bytes: Vec<u8> = vec![0xff, 0xfe];
+        let utf8_err = std::str::from_utf8(&bytes).unwrap_err();
+        let err = Error::Utf8(utf8_err);
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn error_source_hex() {
+        use std::error::Error as StdError;
+        let hex_err = hex_simd::decode_to_vec("zz").unwrap_err();
+        let err = Error::FromHex(hex_err);
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn error_source_none_for_simple_variants() {
+        use std::error::Error as StdError;
+        assert!(Error::Truncated.source().is_none());
+        assert!(Error::VarintOverflow.source().is_none());
+        assert!(Error::InvalidPrefix.source().is_none());
+        assert!(Error::UnsupportedVersion(1).source().is_none());
+        assert!(Error::TrailingBytes.source().is_none());
+        assert!(Error::TaggedVarintOverflow.source().is_none());
     }
 }

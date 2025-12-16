@@ -1,4 +1,4 @@
-use notepack::{Error, NoteBuf, NoteParser, ParsedField, StringType, pack_note_to_string};
+use notepack::{Error, NoteBuf, NoteParser, ParsedField, StringType, pack_note_to_string, MAX_ALLOCATION_SIZE};
 use std::io;
 
 fn main() -> Result<(), Error> {
@@ -20,7 +20,7 @@ fn main() -> Result<(), Error> {
         let parser = NoteParser::new(&packed);
         let mut note = NoteBuf::default();
         for field in parser {
-            process_field(&mut note, field?);
+            process_field(&mut note, field?)?;
         }
         println!("{}", serde_json::to_string(&note)?);
     } else {
@@ -32,7 +32,7 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-fn process_field(note: &mut NoteBuf, field: ParsedField<'_>) {
+fn process_field(note: &mut NoteBuf, field: ParsedField<'_>) -> Result<(), Error> {
     match field {
         ParsedField::Version(_v) => {}
         ParsedField::Id(id) => {
@@ -53,8 +53,16 @@ fn process_field(note: &mut NoteBuf, field: ParsedField<'_>) {
         ParsedField::Content(content) => {
             note.content = content.to_string();
         }
-        ParsedField::NumTags(n) => note.tags = Vec::with_capacity(n as usize),
-        ParsedField::NumTagElems(n) => note.tags.push(Vec::with_capacity(n as usize)),
+        ParsedField::NumTags(n) => {
+            // Cap allocation to prevent OOM from malicious payloads
+            let capped = (n as usize).min(MAX_ALLOCATION_SIZE as usize);
+            note.tags = Vec::with_capacity(capped);
+        }
+        ParsedField::NumTagElems(n) => {
+            // Cap allocation to prevent OOM from malicious payloads
+            let capped = (n as usize).min(MAX_ALLOCATION_SIZE as usize);
+            note.tags.push(Vec::with_capacity(capped));
+        }
         ParsedField::Tag(tag) => {
             let ind = note.tags.len() - 1;
             let current = &mut note.tags[ind];
@@ -68,6 +76,7 @@ fn process_field(note: &mut NoteBuf, field: ParsedField<'_>) {
             }
         }
     }
+    Ok(())
 }
 
 /*

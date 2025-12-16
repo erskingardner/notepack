@@ -92,10 +92,10 @@ impl<'a> Note<'a> {
     /// ```rust
     /// use notepack::NoteParser;
     ///
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// let note = NoteParser::new(&bytes).into_note().unwrap();
     /// let owned = note.to_owned().unwrap();
-    /// assert_eq!(owned.content, "hi");
+    /// assert_eq!(owned.content, "hello");
     /// ```
     pub fn to_owned(&self) -> Result<NoteBuf, Error> {
         // The tag count is attacker-controlled when parsing arbitrary bytes. Avoid preallocating
@@ -203,7 +203,7 @@ impl<'a> Serialize for Note<'a> {
 /// ```rust
 /// # use notepack::{NoteParser, StringType};
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let packed = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA")?;
+/// let packed = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw")?;
 /// let note = NoteParser::new(&packed).into_note()?;
 /// let mut tags = note.tags.clone();
 ///
@@ -247,7 +247,7 @@ pub struct Tags<'a> {
 /// ```rust
 /// # use notepack::{NoteParser, StringType};
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA")?;
+/// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw")?;
 /// let note = NoteParser::new(&bytes).into_note()?;
 /// let mut tags = note.tags.clone();
 ///
@@ -288,7 +288,7 @@ impl<'a> Tags<'a> {
     /// ```rust
     /// use notepack::NoteParser;
     ///
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// let note = NoteParser::new(&bytes).into_note().unwrap();
     /// // Tags are lazily parsed; check the count
     /// println!("tag count: {}", note.tags.len());
@@ -336,7 +336,7 @@ impl<'a> Tags<'a> {
     /// ```rust
     /// use notepack::{NoteParser, StringType};
     ///
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// let note = NoteParser::new(&bytes).into_note().unwrap();
     /// let mut tags = note.tags.clone();
     ///
@@ -370,12 +370,12 @@ impl<'a, 'p> TagElems<'a, 'p> {
     /// ```rust
     /// use notepack::NoteParser;
     ///
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// let note = NoteParser::new(&bytes).into_note().unwrap();
     /// let mut tags = note.tags.clone();
     ///
     /// if let Some(elems) = tags.next_tag().unwrap() {
-    ///     assert_eq!(elems.remaining(), 2); // This tag has 2 elements
+    ///     assert_eq!(elems.remaining(), 3); // First tag has 3 elements
     /// }
     /// ```
     #[inline]
@@ -399,7 +399,7 @@ impl<'a, 'p> TagElems<'a, 'p> {
     /// ```rust
     /// use notepack::NoteParser;
     ///
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// let note = NoteParser::new(&bytes).into_note().unwrap();
     /// let mut tags = note.tags.clone();
     ///
@@ -474,12 +474,12 @@ mod tests {
     use crate::varint::{write_tagged_varint, write_varint};
 
     fn push_elem_str(buf: &mut Vec<u8>, s: &str) {
-        write_tagged_varint(buf, s.len() as u64, false);
+        write_tagged_varint(buf, s.len() as u64, false).unwrap();
         buf.extend_from_slice(s.as_bytes());
     }
 
     fn push_elem_bytes(buf: &mut Vec<u8>, bs: &[u8]) {
-        write_tagged_varint(buf, bs.len() as u64, true);
+        write_tagged_varint(buf, bs.len() as u64, true).unwrap();
         buf.extend_from_slice(bs);
     }
 
@@ -604,7 +604,7 @@ mod tests {
         let mut buf = Vec::new();
         write_varint(&mut buf, 1); // one tag
         write_varint(&mut buf, 1); // one element
-        write_tagged_varint(&mut buf, 10, false); // claim 10-byte UTF-8
+        write_tagged_varint(&mut buf, 10, false).unwrap(); // claim 10-byte UTF-8
         buf.extend_from_slice(b"abc"); // only 3 bytes -> truncated
 
         let mut input = buf.as_slice();
@@ -678,23 +678,23 @@ mod to_owned_tests {
 
         // Tag 0: ["e", <hex>]
         write_varint(&mut buf, 2);
-        write_tagged_varint(&mut buf, 1, false);
+        write_tagged_varint(&mut buf, 1, false).unwrap();
         buf.push(b'e');
-        write_tagged_varint(&mut buf, 32, true);
+        write_tagged_varint(&mut buf, 32, true).unwrap();
         buf.extend_from_slice(&[0xdd; 32]);
 
         // Tag 1: ["p", <hex>]
         write_varint(&mut buf, 2);
-        write_tagged_varint(&mut buf, 1, false);
+        write_tagged_varint(&mut buf, 1, false).unwrap();
         buf.push(b'p');
-        write_tagged_varint(&mut buf, 32, true);
+        write_tagged_varint(&mut buf, 32, true).unwrap();
         buf.extend_from_slice(&[0xee; 32]);
 
         // Tag 2: ["t", "test"]
         write_varint(&mut buf, 2);
-        write_tagged_varint(&mut buf, 1, false);
+        write_tagged_varint(&mut buf, 1, false).unwrap();
         buf.push(b't');
-        write_tagged_varint(&mut buf, 4, false);
+        write_tagged_varint(&mut buf, 4, false).unwrap();
         buf.extend_from_slice(b"test");
 
         buf
@@ -801,7 +801,7 @@ mod to_owned_tests {
         write_varint(&mut buf, 0); // content len
         write_varint(&mut buf, 1); // num_tags
         write_varint(&mut buf, 1); // tag 0 has 1 elem
-        write_tagged_varint(&mut buf, 0, false); // empty string
+        write_tagged_varint(&mut buf, 0, false).unwrap(); // empty string
 
         let note = NoteParser::new(&buf).into_note().unwrap();
         let owned = note.to_owned().unwrap();
@@ -831,9 +831,9 @@ mod serialization_tests {
         buf.extend_from_slice(b"hi"); // content
         write_varint(&mut buf, 1); // num_tags
         write_varint(&mut buf, 2); // tag 0 has 2 elems
-        write_tagged_varint(&mut buf, 1, false);
+        write_tagged_varint(&mut buf, 1, false).unwrap();
         buf.push(b'p');
-        write_tagged_varint(&mut buf, 32, true);
+        write_tagged_varint(&mut buf, 32, true).unwrap();
         buf.extend_from_slice(&[0x44; 32]);
         buf
     }

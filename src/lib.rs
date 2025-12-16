@@ -40,7 +40,7 @@
 //! ```rust
 //! use notepack::{NoteParser, ParsedField};
 //!
-//! let b64 = "notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA";
+//! let b64 = "notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw";
 //! let bytes = NoteParser::decode(b64).unwrap();
 //! let parser = NoteParser::new(&bytes);
 //!
@@ -87,7 +87,7 @@ mod varint;
 
 pub use error::Error;
 pub use note::{Note, NoteBuf, TagElems, Tags};
-pub use parser::{NoteParser, ParsedField, ParserState};
+pub use parser::{NoteParser, ParsedField, ParserState, MAX_ALLOCATION_SIZE, SUPPORTED_VERSION};
 pub use stringtype::StringType;
 
 use std::io::Write;
@@ -98,19 +98,25 @@ use varint::{write_tagged_varint, write_tagged_varint_to, write_varint, write_va
 /// This is the streaming/zero-alloc encoding API. It appends the notepack binary
 /// directly to the provided buffer, allowing callers to reuse allocations.
 ///
-/// Returns the number of bytes written, or an [`Error`] if hex decoding fails.
+/// Returns the number of bytes written, or an [`Error`] if encoding fails.
 ///
 /// # Errors
 ///
-/// Returns [`Error::FromHex`] if any hex string field (like `id`, `pubkey`, or `sig`)
-/// fails to decode.
+/// - [`Error::FromHex`] if any hex string field fails to decode.
+/// - [`Error::InvalidFieldLength`] if `id`, `pubkey`, or `sig` have wrong sizes.
+/// - [`Error::TaggedVarintOverflow`] if a tag element is too large.
 ///
 /// # Example
 ///
 /// ```rust
 /// use notepack::{NoteBuf, pack_note_into};
 ///
-/// let note = NoteBuf::default();
+/// let note = NoteBuf {
+///     id: "00".repeat(32),
+///     pubkey: "11".repeat(32),
+///     sig: "22".repeat(64),
+///     ..Default::default()
+/// };
 /// let mut buf = Vec::with_capacity(256);
 /// let len = pack_note_into(&note, &mut buf).unwrap();
 /// assert_eq!(len, buf.len());
@@ -121,16 +127,37 @@ pub fn pack_note_into(note: &NoteBuf, buf: &mut Vec<u8>) -> Result<usize, Error>
     // version
     write_varint(buf, 1);
 
-    // id
+    // id - must be exactly 32 bytes
     let id_bytes = hex_simd::decode_to_vec(&note.id)?;
+    if id_bytes.len() != 32 {
+        return Err(Error::InvalidFieldLength {
+            field: "id",
+            expected: 32,
+            actual: id_bytes.len(),
+        });
+    }
     buf.extend_from_slice(&id_bytes);
 
-    // pubkey
+    // pubkey - must be exactly 32 bytes
     let pk_bytes = hex_simd::decode_to_vec(&note.pubkey)?;
+    if pk_bytes.len() != 32 {
+        return Err(Error::InvalidFieldLength {
+            field: "pubkey",
+            expected: 32,
+            actual: pk_bytes.len(),
+        });
+    }
     buf.extend_from_slice(&pk_bytes);
 
-    // signature
+    // signature - must be exactly 64 bytes
     let sig_bytes = hex_simd::decode_to_vec(&note.sig)?;
+    if sig_bytes.len() != 64 {
+        return Err(Error::InvalidFieldLength {
+            field: "sig",
+            expected: 64,
+            actual: sig_bytes.len(),
+        });
+    }
     buf.extend_from_slice(&sig_bytes);
 
     write_varint(buf, note.created_at);
@@ -144,7 +171,7 @@ pub fn pack_note_into(note: &NoteBuf, buf: &mut Vec<u8>) -> Result<usize, Error>
         write_varint(buf, tag.len() as u64);
 
         for elem in tag {
-            write_string(buf, elem.as_str());
+            write_string(buf, elem.as_str())?;
         }
     }
 
@@ -159,27 +186,41 @@ pub fn pack_note_into(note: &NoteBuf, buf: &mut Vec<u8>) -> Result<usize, Error>
 /// - Writes variable-length fields (`content`, `tags`) with varint length prefixes.
 /// - Optimizes strings that look like 32-byte hex by storing them in a compressed form.
 ///
-/// Returns a `Vec<u8>` containing the binary payload, or an [`Error`] if hex decoding fails.
+/// Returns a `Vec<u8>` containing the binary payload, or an [`Error`] if encoding fails.
 ///
 /// For buffer reuse, see [`pack_note_into`] which appends to an existing buffer.
 ///
 /// # Errors
 ///
-/// Returns [`Error::FromHex`] if any hex string field (like `id`, `pubkey`, or `sig`)
-/// fails to decode.
+/// - [`Error::FromHex`] if any hex string field fails to decode.
+/// - [`Error::InvalidFieldLength`] if `id`, `pubkey`, or `sig` have wrong sizes.
+/// - [`Error::TaggedVarintOverflow`] if a tag element is too large.
 ///
 /// # Example
 ///
 /// ```rust
 /// use notepack::{NoteBuf, pack_note};
 ///
-/// let note = NoteBuf::default();
+/// let note = NoteBuf {
+///     id: "00".repeat(32),
+///     pubkey: "11".repeat(32),
+///     sig: "22".repeat(64),
+///     ..Default::default()
+/// };
 /// let binary = pack_note(&note).unwrap();
 /// assert!(binary.len() > 0);
 /// ```
 pub fn pack_note(note: &NoteBuf) -> Result<Vec<u8>, Error> {
-    // Pre-allocate: version(1) + id(32) + pubkey(32) + sig(64) + overhead
-    let mut buf = Vec::with_capacity(150 + note.content.len());
+    // Pre-allocate: version(1) + id(32) + pubkey(32) + sig(64) + content + estimated tags
+    let tags_estimate: usize = note
+        .tags
+        .iter()
+        .map(|tag| {
+            // 1 byte for num_elems varint + sum of element lengths + 1 byte per elem for tagged varint
+            1 + tag.iter().map(|e| e.len() + 1).sum::<usize>()
+        })
+        .sum();
+    let mut buf = Vec::with_capacity(150 + note.content.len() + tags_estimate);
     pack_note_into(note, &mut buf)?;
     Ok(buf)
 }
@@ -194,6 +235,8 @@ pub fn pack_note(note: &NoteBuf) -> Result<Vec<u8>, Error> {
 /// # Errors
 ///
 /// - [`Error::FromHex`] if any hex string field fails to decode.
+/// - [`Error::InvalidFieldLength`] if `id`, `pubkey`, or `sig` have wrong sizes.
+/// - [`Error::TaggedVarintOverflow`] if a tag element is too large.
 /// - [`Error::Io`] if writing to the writer fails.
 ///
 /// # Example
@@ -201,7 +244,12 @@ pub fn pack_note(note: &NoteBuf) -> Result<Vec<u8>, Error> {
 /// ```rust
 /// use notepack::{NoteBuf, pack_note_to_writer};
 ///
-/// let note = NoteBuf::default();
+/// let note = NoteBuf {
+///     id: "00".repeat(32),
+///     pubkey: "11".repeat(32),
+///     sig: "22".repeat(64),
+///     ..Default::default()
+/// };
 /// let mut output = Vec::new();
 /// let len = pack_note_to_writer(&note, &mut output).unwrap();
 /// assert_eq!(len, output.len());
@@ -213,7 +261,12 @@ pub fn pack_note(note: &NoteBuf) -> Result<Vec<u8>, Error> {
 /// use notepack::{NoteBuf, pack_note_to_writer};
 /// use std::fs::File;
 ///
-/// let note = NoteBuf::default();
+/// let note = NoteBuf {
+///     id: "00".repeat(32),
+///     pubkey: "11".repeat(32),
+///     sig: "22".repeat(64),
+///     ..Default::default()
+/// };
 /// let mut file = File::create("note.bin").unwrap();
 /// pack_note_to_writer(&note, &mut file).unwrap();
 /// ```
@@ -223,18 +276,39 @@ pub fn pack_note_to_writer<W: Write>(note: &NoteBuf, w: &mut W) -> Result<usize,
     // version
     len += write_varint_to(w, 1)?;
 
-    // id
+    // id - must be exactly 32 bytes
     let id_bytes = hex_simd::decode_to_vec(&note.id)?;
+    if id_bytes.len() != 32 {
+        return Err(Error::InvalidFieldLength {
+            field: "id",
+            expected: 32,
+            actual: id_bytes.len(),
+        });
+    }
     w.write_all(&id_bytes)?;
     len += id_bytes.len();
 
-    // pubkey
+    // pubkey - must be exactly 32 bytes
     let pk_bytes = hex_simd::decode_to_vec(&note.pubkey)?;
+    if pk_bytes.len() != 32 {
+        return Err(Error::InvalidFieldLength {
+            field: "pubkey",
+            expected: 32,
+            actual: pk_bytes.len(),
+        });
+    }
     w.write_all(&pk_bytes)?;
     len += pk_bytes.len();
 
-    // signature
+    // signature - must be exactly 64 bytes
     let sig_bytes = hex_simd::decode_to_vec(&note.sig)?;
+    if sig_bytes.len() != 64 {
+        return Err(Error::InvalidFieldLength {
+            field: "sig",
+            expected: 64,
+            actual: sig_bytes.len(),
+        });
+    }
     w.write_all(&sig_bytes)?;
     len += sig_bytes.len();
 
@@ -273,7 +347,12 @@ pub fn pack_note_to_writer<W: Write>(note: &NoteBuf, w: &mut W) -> Result<usize,
 /// ```rust
 /// use notepack::{NoteBuf, pack_note_to_string};
 ///
-/// let note = NoteBuf::default();
+/// let note = NoteBuf {
+///     id: "00".repeat(32),
+///     pubkey: "11".repeat(32),
+///     sig: "22".repeat(64),
+///     ..Default::default()
+/// };
 /// let s = pack_note_to_string(&note).unwrap();
 /// assert!(s.starts_with("notepack_"));
 /// ```
@@ -292,14 +371,14 @@ fn base64_encode(bs: &[u8]) -> String {
 /// Decode a lowercase hex string to bytes.
 ///
 /// Only lowercase hex is accepted to ensure round-trip encoding works correctly.
-/// Uppercase hex or odd-length strings return [`Error::FromHex`].
+/// Uppercase hex or odd-length strings return an error.
 #[cfg(test)]
-fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, Error> {
+fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, HexDecodeError> {
     let bytes = input.as_bytes();
 
     // Reject odd-length hex strings
     if !bytes.len().is_multiple_of(2) {
-        return Err(Error::FromHex);
+        return Err(HexDecodeError);
     }
 
     let mut out = Vec::with_capacity(bytes.len() / 2);
@@ -312,14 +391,19 @@ fn decode_lowercase_hex(input: &str) -> Result<Vec<u8>, Error> {
     Ok(out)
 }
 
+/// Errors returned when lowercase hex decoding fails in internal functions.
+/// These are distinct from hex_simd errors and indicate non-lowercase hex.
+#[derive(Debug)]
+struct HexDecodeError;
+
 #[inline]
-fn decode_lower_hex_nibble(b: u8) -> Result<u8, Error> {
+fn decode_lower_hex_nibble(b: u8) -> Result<u8, HexDecodeError> {
     match b {
         b'0'..=b'9' => Ok(b - b'0'),
         b'a'..=b'f' => Ok(b - b'a' + 10),
         // Uppercase must be rejected for round-trip stability.
-        b'A'..=b'F' => Err(Error::FromHex),
-        _ => Err(Error::FromHex),
+        b'A'..=b'F' => Err(HexDecodeError),
+        _ => Err(HexDecodeError),
     }
 }
 
@@ -327,33 +411,35 @@ fn decode_lower_hex_nibble(b: u8) -> Result<u8, Error> {
 ///
 /// If the string is valid lowercase hex, it's compacted to raw bytes (tagged=true).
 /// Otherwise, it's written as UTF-8 text (tagged=false).
-fn write_string(buf: &mut Vec<u8>, string: &str) {
+fn write_string(buf: &mut Vec<u8>, string: &str) -> Result<(), Error> {
     if string.is_empty() {
-        write_tagged_varint(buf, 0, false);
-        return;
+        write_tagged_varint(buf, 0, false)?;
+        return Ok(());
     }
 
-    if !try_write_compacted_hex(buf, string) {
-        write_tagged_varint(buf, string.len() as u64, false);
+    if !try_write_compacted_hex(buf, string)? {
+        write_tagged_varint(buf, string.len() as u64, false)?;
         buf.extend_from_slice(string.as_bytes());
     }
+    Ok(())
 }
 
 /// Attempt to compact a lowercase hex string directly into `buf`.
 ///
 /// This avoids allocating an intermediate `Vec<u8>` for common tag payloads.
+/// Returns `Ok(true)` if compacted, `Ok(false)` if not hex, `Err` if varint overflow.
 #[inline]
-fn try_write_compacted_hex(buf: &mut Vec<u8>, string: &str) -> bool {
+fn try_write_compacted_hex(buf: &mut Vec<u8>, string: &str) -> Result<bool, Error> {
     let s = string.as_bytes();
     if !s.len().is_multiple_of(2) {
-        return false;
+        return Ok(false);
     }
 
     let nbytes = s.len() / 2;
     let start = buf.len();
 
     // Write tagged length prefix first; roll back on validation failure.
-    write_tagged_varint(buf, nbytes as u64, true);
+    write_tagged_varint(buf, nbytes as u64, true)?;
     buf.reserve(nbytes);
 
     for i in 0..nbytes {
@@ -361,27 +447,27 @@ fn try_write_compacted_hex(buf: &mut Vec<u8>, string: &str) -> bool {
             Ok(v) => v,
             Err(_) => {
                 buf.truncate(start);
-                return false;
+                return Ok(false);
             }
         };
         let lo = match decode_lower_hex_nibble(s[i * 2 + 1]) {
             Ok(v) => v,
             Err(_) => {
                 buf.truncate(start);
-                return false;
+                return Ok(false);
             }
         };
         buf.push((hi << 4) | lo);
     }
 
-    true
+    Ok(true)
 }
 
 /// Write a tag element string to a [`Write`] implementor.
 ///
 /// Same compaction logic as [`write_string`]: hex strings become raw bytes.
 /// Returns the total number of bytes written.
-fn write_string_to<W: Write>(w: &mut W, string: &str) -> std::io::Result<usize> {
+fn write_string_to<W: Write>(w: &mut W, string: &str) -> Result<usize, Error> {
     if string.is_empty() {
         return write_tagged_varint_to(w, 0, false);
     }
@@ -498,25 +584,25 @@ mod tests {
     #[test]
     fn decode_lowercase_hex_rejects_uppercase() {
         let err = decode_lowercase_hex("AABBCCDD");
-        assert!(matches!(err, Err(Error::FromHex)));
+        assert!(err.is_err());
     }
 
     #[test]
     fn decode_lowercase_hex_rejects_mixed_case() {
         let err = decode_lowercase_hex("aaBBccDD");
-        assert!(matches!(err, Err(Error::FromHex)));
+        assert!(err.is_err());
     }
 
     #[test]
     fn decode_lowercase_hex_rejects_odd_length() {
         let err = decode_lowercase_hex("aabbc");
-        assert!(matches!(err, Err(Error::FromHex)));
+        assert!(err.is_err());
     }
 
     #[test]
     fn decode_lowercase_hex_rejects_invalid_chars() {
         let err = decode_lowercase_hex("gghhiijj");
-        assert!(matches!(err, Err(Error::FromHex)));
+        assert!(err.is_err());
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -700,7 +786,7 @@ mod tests {
     #[test]
     fn write_string_empty() {
         let mut buf = Vec::new();
-        write_string(&mut buf, "");
+        write_string(&mut buf, "").unwrap();
         // Empty string: tagged_varint(0, false) = 0
         assert_eq!(buf, [0x00]);
     }
@@ -708,7 +794,7 @@ mod tests {
     #[test]
     fn write_string_regular_text() {
         let mut buf = Vec::new();
-        write_string(&mut buf, "hello");
+        write_string(&mut buf, "hello").unwrap();
         // tagged_varint(5, false) = 10 = 0x0a, then "hello"
         assert_eq!(&buf[0..1], &[0x0a]);
         assert_eq!(&buf[1..], b"hello");
@@ -717,7 +803,7 @@ mod tests {
     #[test]
     fn write_string_lowercase_hex_compacted() {
         let mut buf = Vec::new();
-        write_string(&mut buf, "aabb");
+        write_string(&mut buf, "aabb").unwrap();
         // tagged_varint(2, true) = (2 << 1) | 1 = 5 = 0x05
         // Then raw bytes 0xaa 0xbb
         assert_eq!(buf, [0x05, 0xaa, 0xbb]);
@@ -726,7 +812,7 @@ mod tests {
     #[test]
     fn write_string_uppercase_hex_not_compacted() {
         let mut buf = Vec::new();
-        write_string(&mut buf, "AABB");
+        write_string(&mut buf, "AABB").unwrap();
         // Should be treated as text, not compacted
         // tagged_varint(4, false) = 8 = 0x08
         assert_eq!(&buf[0..1], &[0x08]);
@@ -736,7 +822,7 @@ mod tests {
     #[test]
     fn write_string_mixed_case_hex_not_compacted() {
         let mut buf = Vec::new();
-        write_string(&mut buf, "aAbB");
+        write_string(&mut buf, "aAbB").unwrap();
         // Mixed case should be treated as text
         assert_eq!(&buf[0..1], &[0x08]);
         assert_eq!(&buf[1..], b"aAbB");
@@ -745,7 +831,7 @@ mod tests {
     #[test]
     fn write_string_odd_length_hex_not_compacted() {
         let mut buf = Vec::new();
-        write_string(&mut buf, "aab");
+        write_string(&mut buf, "aab").unwrap();
         // Odd length is not valid hex
         assert_eq!(&buf[0..1], &[0x06]); // tagged_varint(3, false) = 6
         assert_eq!(&buf[1..], b"aab");
@@ -755,7 +841,7 @@ mod tests {
     fn write_string_32byte_pubkey_compacted() {
         let pubkey = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let mut buf = Vec::new();
-        write_string(&mut buf, pubkey);
+        write_string(&mut buf, pubkey).unwrap();
 
         // tagged_varint(32, true) = (32 << 1) | 1 = 65 = 0x41
         assert_eq!(buf[0], 0x41);
@@ -773,13 +859,77 @@ mod tests {
 
         for s in test_cases {
             let mut buf = Vec::new();
-            write_string(&mut buf, s);
+            write_string(&mut buf, s).unwrap();
 
             let mut writer_buf = Vec::new();
             let written = write_string_to(&mut writer_buf, s).unwrap();
 
             assert_eq!(buf, writer_buf, "mismatch for string '{s}'");
             assert_eq!(written, buf.len());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Field length validation tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn pack_note_rejects_short_id() {
+        let mut note = minimal_note();
+        note.id = "aabb".into(); // Only 2 bytes, need 32
+        let err = pack_note(&note).unwrap_err();
+        match err {
+            Error::InvalidFieldLength { field, expected, actual } => {
+                assert_eq!(field, "id");
+                assert_eq!(expected, 32);
+                assert_eq!(actual, 2);
+            }
+            _ => panic!("expected InvalidFieldLength error"),
+        }
+    }
+
+    #[test]
+    fn pack_note_rejects_long_id() {
+        let mut note = minimal_note();
+        note.id = "aa".repeat(33); // 33 bytes, need 32
+        let err = pack_note(&note).unwrap_err();
+        match err {
+            Error::InvalidFieldLength { field, expected, actual } => {
+                assert_eq!(field, "id");
+                assert_eq!(expected, 32);
+                assert_eq!(actual, 33);
+            }
+            _ => panic!("expected InvalidFieldLength error"),
+        }
+    }
+
+    #[test]
+    fn pack_note_rejects_short_pubkey() {
+        let mut note = minimal_note();
+        note.pubkey = "bb".repeat(16); // 16 bytes, need 32
+        let err = pack_note(&note).unwrap_err();
+        match err {
+            Error::InvalidFieldLength { field, expected, actual } => {
+                assert_eq!(field, "pubkey");
+                assert_eq!(expected, 32);
+                assert_eq!(actual, 16);
+            }
+            _ => panic!("expected InvalidFieldLength error"),
+        }
+    }
+
+    #[test]
+    fn pack_note_rejects_short_sig() {
+        let mut note = minimal_note();
+        note.sig = "cc".repeat(32); // 32 bytes, need 64
+        let err = pack_note(&note).unwrap_err();
+        match err {
+            Error::InvalidFieldLength { field, expected, actual } => {
+                assert_eq!(field, "sig");
+                assert_eq!(expected, 64);
+                assert_eq!(actual, 32);
+            }
+            _ => panic!("expected InvalidFieldLength error"),
         }
     }
 

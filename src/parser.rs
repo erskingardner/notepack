@@ -3,6 +3,12 @@ use crate::stringtype::StringType;
 use crate::varint::{read_tagged_varint, read_varint};
 use crate::{Note, Tags};
 
+/// Maximum allocation size (128 KB) to prevent OOM from malicious payloads.
+pub const MAX_ALLOCATION_SIZE: u64 = 128 * 1024;
+
+/// The currently supported notepack format version.
+pub const SUPPORTED_VERSION: u8 = 1;
+
 /// Represents a parsed field from a notepack‐encoded Nostr note.
 ///
 /// Each variant corresponds to a logical field in the binary format,
@@ -89,7 +95,7 @@ pub struct NoteParser<'a> {
 /// ```rust
 /// use notepack::{NoteParser, ParserState};
 ///
-/// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+/// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
 /// let mut parser = NoteParser::new(&bytes);
 ///
 /// // Consume all fields
@@ -142,7 +148,7 @@ impl<'a> NoteParser<'a> {
     /// ```rust
     /// use notepack::{NoteParser, ParsedField};
     ///
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// let parser = NoteParser::new(&bytes);
     ///
     /// for field in parser {
@@ -174,23 +180,28 @@ impl<'a> NoteParser<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the fixed header fields (version, id, pubkey, sig,
-    /// timestamps, content) are malformed or truncated.
+    /// - [`Error::UnsupportedVersion`] if the version is not 1.
+    /// - [`Error::Truncated`] if the data is incomplete.
+    /// - [`Error::AllocationLimitExceeded`] if content or tag counts are too large.
+    /// - [`Error::Utf8`] if content is not valid UTF-8.
     ///
     /// # Example
     ///
     /// ```rust
     /// use notepack::NoteParser;
     ///
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// let note = NoteParser::new(&bytes).into_note().unwrap();
     ///
-    /// assert_eq!(note.kind, 1);
-    /// assert_eq!(note.content, "hi");
+    /// assert_eq!(note.kind, 0);
+    /// assert_eq!(note.content, "hello");
     /// ```
     pub fn into_note(mut self) -> Result<Note<'a>, Error> {
-        // version (currently not stored)
-        let _version = read_varint(&mut self.data)? as u8;
+        // version - must be 1
+        let version = read_varint(&mut self.data)? as u8;
+        if version != SUPPORTED_VERSION {
+            return Err(Error::UnsupportedVersion(version));
+        }
 
         // fixed-size fields
         let id = read_bytes(32, &mut self.data)?;
@@ -201,8 +212,14 @@ impl<'a> NoteParser<'a> {
         let created_at = read_varint(&mut self.data)?;
         let kind = read_varint(&mut self.data)?;
 
-        // content
+        // content - check allocation limit
         let content_len = read_varint(&mut self.data)?;
+        if content_len > MAX_ALLOCATION_SIZE {
+            return Err(Error::AllocationLimitExceeded {
+                requested: content_len,
+                limit: MAX_ALLOCATION_SIZE,
+            });
+        }
         let content_bytes = read_bytes(content_len, &mut self.data)?;
         let content = std::str::from_utf8(content_bytes)?;
 
@@ -212,6 +229,90 @@ impl<'a> NoteParser<'a> {
 
         // Safely coerce slices to fixed-size array refs;
         // These `try_into()` must succeed because we just read exact lengths above.
+        let id: &'a [u8; 32] = id.try_into().expect("length checked");
+        let pubkey: &'a [u8; 32] = pubkey.try_into().expect("length checked");
+        let sig: &'a [u8; 64] = sig.try_into().expect("length checked");
+
+        Ok(Note {
+            id,
+            pubkey,
+            sig,
+            content,
+            created_at,
+            kind,
+            tags,
+        })
+    }
+
+    /// Parse the notepack data into a zero-copy [`Note`] struct, verifying no trailing bytes.
+    ///
+    /// This is like [`into_note`](Self::into_note) but also validates that there are
+    /// no extra bytes after the complete notepack payload, as required by the spec.
+    ///
+    /// Note: This requires iterating through all tags to verify the payload is complete.
+    ///
+    /// # Errors
+    ///
+    /// All errors from [`into_note`](Self::into_note), plus:
+    /// - [`Error::TrailingBytes`] if there are extra bytes after the payload.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
+    /// let note = NoteParser::new(&bytes).into_note_strict().unwrap();
+    /// assert_eq!(note.kind, 0);
+    /// ```
+    pub fn into_note_strict(mut self) -> Result<Note<'a>, Error> {
+        // version - must be 1
+        let version = read_varint(&mut self.data)? as u8;
+        if version != SUPPORTED_VERSION {
+            return Err(Error::UnsupportedVersion(version));
+        }
+
+        // fixed-size fields
+        let id = read_bytes(32, &mut self.data)?;
+        let pubkey = read_bytes(32, &mut self.data)?;
+        let sig = read_bytes(64, &mut self.data)?;
+
+        // integers
+        let created_at = read_varint(&mut self.data)?;
+        let kind = read_varint(&mut self.data)?;
+
+        // content - check allocation limit
+        let content_len = read_varint(&mut self.data)?;
+        if content_len > MAX_ALLOCATION_SIZE {
+            return Err(Error::AllocationLimitExceeded {
+                requested: content_len,
+                limit: MAX_ALLOCATION_SIZE,
+            });
+        }
+        let content_bytes = read_bytes(content_len, &mut self.data)?;
+        let content = std::str::from_utf8(content_bytes)?;
+
+        // Parse tags, advancing self.data past the num_tags varint.
+        // After this, self.data points to the first tag's num_elems (or end if no tags).
+        let tags = Tags::parse(&mut self.data)?;
+
+        // Iterate all tags using self.data directly to track consumption.
+        // This allows us to verify no trailing bytes remain.
+        for _ in 0..tags.len() {
+            // Read num_elems for this tag
+            let num_elems = read_varint(&mut self.data)?;
+            // Skip all elements
+            for _ in 0..num_elems {
+                let _ = read_string(&mut self.data)?;
+            }
+        }
+
+        // Check for trailing bytes
+        if !self.data.is_empty() {
+            return Err(Error::TrailingBytes);
+        }
+
+        // Safely coerce slices to fixed-size array refs
         let id: &'a [u8; 32] = id.try_into().expect("length checked");
         let pubkey: &'a [u8; 32] = pubkey.try_into().expect("length checked");
         let sig: &'a [u8; 64] = sig.try_into().expect("length checked");
@@ -248,12 +349,12 @@ impl<'a> NoteParser<'a> {
     /// use notepack::NoteParser;
     ///
     /// // Decode a notepack string to raw bytes
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// assert!(bytes.len() > 0);
     ///
     /// // Then parse the bytes
     /// let note = NoteParser::new(&bytes).into_note().unwrap();
-    /// assert_eq!(note.content, "hi");
+    /// assert_eq!(note.content, "hello");
     /// ```
     pub fn decode(notepack: &'a str) -> Result<Vec<u8>, Error> {
         if let Some(b64) = notepack.strip_prefix("notepack_") {
@@ -274,7 +375,7 @@ impl<'a> NoteParser<'a> {
     /// ```rust
     /// use notepack::{NoteParser, ParserState};
     ///
-    /// let bytes = NoteParser::decode("notepack_737yskaxtaKQSL3IPPhOOR8T1R4G/f4ARPHGeNPfOpF4417q9YtU+4JZGOD3+Y0S3uVU6/edo64oTqJQ0pOF29Ms7GmX6fzM4Wjc6sohGPlbdRGLjhuqIRccETX5DliwUFy9qGg2lDD9oMl8ijoNFq4wwJ5Ikmr4Vh7NYWBwOkuo/anEBgECaGkA").unwrap();
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
     /// let mut parser = NoteParser::new(&bytes);
     ///
     /// assert_eq!(parser.current_state(), ParserState::Start);
@@ -438,12 +539,12 @@ mod into_note_tests {
     }
 
     fn push_elem_str(buf: &mut Vec<u8>, s: &str) {
-        write_tagged_varint(buf, s.len() as u64, false);
+        write_tagged_varint(buf, s.len() as u64, false).unwrap();
         buf.extend_from_slice(s.as_bytes());
     }
 
     fn push_elem_bytes(buf: &mut Vec<u8>, bs: &[u8]) {
-        write_tagged_varint(buf, bs.len() as u64, true);
+        write_tagged_varint(buf, bs.len() as u64, true).unwrap();
         buf.extend_from_slice(bs);
     }
 
@@ -630,7 +731,7 @@ mod into_note_tests {
         // content bytes: none
         write_varint(&mut bytes, 1); // num_tags
         write_varint(&mut bytes, 1); // tag0: 1 elem
-        write_tagged_varint(&mut bytes, 10, false); // claim 10 bytes (utf8)
+        write_tagged_varint(&mut bytes, 10, false).unwrap(); // claim 10 bytes (utf8)
         bytes.extend_from_slice(b"abc"); // only 3 bytes => truncated
 
         // Act: into_note should still succeed (tags are lazy).
@@ -641,6 +742,113 @@ mod into_note_tests {
         let mut t0 = tags.next_tag().expect("ok").expect("tag0");
         let err = t0.next().unwrap().unwrap_err();
         matches!(err, Error::Truncated);
+    }
+
+    #[test]
+    fn into_note_rejects_unsupported_version() {
+        let id = [0x11; 32];
+        let pk = [0x22; 32];
+        let sig = [0x33; 64];
+
+        // Build with version 2 instead of 1
+        let mut bytes = Vec::new();
+        write_varint(&mut bytes, 2); // unsupported version
+        bytes.extend_from_slice(&id);
+        bytes.extend_from_slice(&pk);
+        bytes.extend_from_slice(&sig);
+        write_varint(&mut bytes, 1234); // created_at
+        write_varint(&mut bytes, 1); // kind
+        write_varint(&mut bytes, 0); // content len
+        write_varint(&mut bytes, 0); // num_tags
+
+        let result = NoteParser::new(&bytes).into_note();
+        assert!(matches!(result, Err(Error::UnsupportedVersion(2))));
+    }
+
+    #[test]
+    fn into_note_rejects_version_zero() {
+        let id = [0x11; 32];
+        let pk = [0x22; 32];
+        let sig = [0x33; 64];
+
+        let mut bytes = Vec::new();
+        write_varint(&mut bytes, 0); // version 0
+        bytes.extend_from_slice(&id);
+        bytes.extend_from_slice(&pk);
+        bytes.extend_from_slice(&sig);
+        write_varint(&mut bytes, 1234);
+        write_varint(&mut bytes, 1);
+        write_varint(&mut bytes, 0);
+        write_varint(&mut bytes, 0);
+
+        let result = NoteParser::new(&bytes).into_note();
+        assert!(matches!(result, Err(Error::UnsupportedVersion(0))));
+    }
+
+    #[test]
+    fn into_note_strict_rejects_trailing_bytes() {
+        let id = [0x11; 32];
+        let pk = [0x22; 32];
+        let sig = [0x33; 64];
+
+        let mut bytes = Vec::new();
+        write_varint(&mut bytes, 1); // version
+        bytes.extend_from_slice(&id);
+        bytes.extend_from_slice(&pk);
+        bytes.extend_from_slice(&sig);
+        write_varint(&mut bytes, 1234); // created_at
+        write_varint(&mut bytes, 1); // kind
+        write_varint(&mut bytes, 2); // content len
+        bytes.extend_from_slice(b"hi"); // content
+        write_varint(&mut bytes, 0); // num_tags
+        bytes.extend_from_slice(b"extra trailing garbage"); // trailing bytes
+
+        let result = NoteParser::new(&bytes).into_note_strict();
+        assert!(matches!(result, Err(Error::TrailingBytes)));
+    }
+
+    #[test]
+    fn into_note_strict_succeeds_without_trailing_bytes() {
+        let id = [0x11; 32];
+        let pk = [0x22; 32];
+        let sig = [0x33; 64];
+
+        let mut bytes = Vec::new();
+        write_varint(&mut bytes, 1); // version
+        bytes.extend_from_slice(&id);
+        bytes.extend_from_slice(&pk);
+        bytes.extend_from_slice(&sig);
+        write_varint(&mut bytes, 1234); // created_at
+        write_varint(&mut bytes, 1); // kind
+        write_varint(&mut bytes, 2); // content len
+        bytes.extend_from_slice(b"hi"); // content
+        write_varint(&mut bytes, 0); // num_tags
+
+        let note = NoteParser::new(&bytes).into_note_strict().expect("should succeed");
+        assert_eq!(note.content, "hi");
+    }
+
+    #[test]
+    fn into_note_rejects_huge_content_length() {
+        let id = [0x11; 32];
+        let pk = [0x22; 32];
+        let sig = [0x33; 64];
+
+        let mut bytes = Vec::new();
+        write_varint(&mut bytes, 1); // version
+        bytes.extend_from_slice(&id);
+        bytes.extend_from_slice(&pk);
+        bytes.extend_from_slice(&sig);
+        write_varint(&mut bytes, 1234); // created_at
+        write_varint(&mut bytes, 1); // kind
+        write_varint(&mut bytes, 1_000_000_000); // huge content len (1GB)
+        // No actual content bytes
+
+        let result = NoteParser::new(&bytes).into_note();
+        assert!(matches!(
+            result,
+            Err(Error::AllocationLimitExceeded { .. })
+        ));
     }
 }
 
@@ -797,14 +1005,14 @@ mod iterator_tests {
 
         // Tag 1: ["e", <32-byte hex>]
         write_varint(&mut buf, 2); // num_elems
-        write_tagged_varint(&mut buf, 1, false); // "e"
+        write_tagged_varint(&mut buf, 1, false).unwrap(); // "e"
         buf.push(b'e');
-        write_tagged_varint(&mut buf, 32, true); // 32 bytes
+        write_tagged_varint(&mut buf, 32, true).unwrap(); // 32 bytes
         buf.extend_from_slice(&[0xaa; 32]);
 
         // Tag 2: ["p"]
         write_varint(&mut buf, 1); // num_elems
-        write_tagged_varint(&mut buf, 1, false); // "p"
+        write_tagged_varint(&mut buf, 1, false).unwrap(); // "p"
         buf.push(b'p');
 
         let parser = NoteParser::new(&buf);
@@ -966,7 +1174,7 @@ mod read_string_tests {
     #[test]
     fn read_string_utf8() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 5, false);
+        write_tagged_varint(&mut buf, 5, false).unwrap();
         buf.extend_from_slice(b"hello");
 
         let mut slice = buf.as_slice();
@@ -978,7 +1186,7 @@ mod read_string_tests {
     #[test]
     fn read_string_bytes() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 3, true);
+        write_tagged_varint(&mut buf, 3, true).unwrap();
         buf.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
 
         let mut slice = buf.as_slice();
@@ -993,7 +1201,7 @@ mod read_string_tests {
     #[test]
     fn read_string_empty() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 0, false);
+        write_tagged_varint(&mut buf, 0, false).unwrap();
 
         let mut slice = buf.as_slice();
         let result = read_string(&mut slice).unwrap();
@@ -1003,7 +1211,7 @@ mod read_string_tests {
     #[test]
     fn read_string_truncated() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 10, false); // claims 10 bytes
+        write_tagged_varint(&mut buf, 10, false).unwrap(); // claims 10 bytes
         buf.extend_from_slice(b"abc"); // only 3
 
         let mut slice = buf.as_slice();
@@ -1014,7 +1222,7 @@ mod read_string_tests {
     #[test]
     fn read_string_invalid_utf8() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 2, false); // UTF-8 string
+        write_tagged_varint(&mut buf, 2, false).unwrap(); // UTF-8 string
         buf.extend_from_slice(&[0xff, 0xfe]); // invalid UTF-8
 
         let mut slice = buf.as_slice();

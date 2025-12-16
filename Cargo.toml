@@ -2,6 +2,7 @@
 name = "notepack"
 version = "0.3.0"
 edition = "2024"
+rust-version = "1.90"
 description = "A compact binary format and Rust library for encoding and decoding Nostr notes"
 authors = ["William Casarin <jb55@jb55.com>"]
 license = "MIT"

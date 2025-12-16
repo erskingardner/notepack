@@ -69,18 +69,22 @@ pub fn read_tagged_varint(input: &mut &[u8]) -> Result<(u64, bool), Error> {
 
 /// Encode a tagged varint: shifts `value` left by 1 and sets the low bit if `tagged`.
 ///
-/// Returns the number of bytes written.
+/// Returns the number of bytes written, or an error if the value is too large.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if `value` is too large to shift left (i.e., `value >= 2^63`).
+/// Returns [`Error::TaggedVarintOverflow`] if `value >= 2^63` (cannot be shifted left).
 #[inline]
-pub fn write_tagged_varint(buf: &mut Vec<u8>, value: u64, tagged: bool) -> usize {
-    let tagged = value
+pub fn write_tagged_varint(buf: &mut Vec<u8>, value: u64, tagged: bool) -> Result<usize, Error> {
+    let shifted = value
         .checked_shl(1)
-        .expect("value too large for tagged varint")
-        | (tagged as u64);
-    write_varint(buf, tagged)
+        .ok_or(Error::TaggedVarintOverflow)?;
+    // Also check that the high bit wasn't set (which would wrap to 0)
+    if value >= (1u64 << 63) {
+        return Err(Error::TaggedVarintOverflow);
+    }
+    let tagged_value = shifted | (tagged as u64);
+    Ok(write_varint(buf, tagged_value))
 }
 
 /// Write a varint to any [`Write`] implementor.
@@ -106,18 +110,27 @@ pub fn write_varint_to<W: Write>(w: &mut W, mut n: u64) -> std::io::Result<usize
 
 /// Write a tagged varint to any [`Write`] implementor.
 ///
-/// Returns the number of bytes written.
+/// Returns the number of bytes written, or an error if the value is too large or I/O fails.
+///
+/// # Errors
+///
+/// Returns [`Error::TaggedVarintOverflow`] if `value >= 2^63`.
+/// Returns [`Error::Io`] if writing fails.
 #[inline]
 pub fn write_tagged_varint_to<W: Write>(
     w: &mut W,
     value: u64,
     tagged: bool,
-) -> std::io::Result<usize> {
-    let tagged = value
+) -> Result<usize, Error> {
+    let shifted = value
         .checked_shl(1)
-        .expect("value too large for tagged varint")
-        | (tagged as u64);
-    write_varint_to(w, tagged)
+        .ok_or(Error::TaggedVarintOverflow)?;
+    // Also check that the high bit wasn't set (which would wrap to 0)
+    if value >= (1u64 << 63) {
+        return Err(Error::TaggedVarintOverflow);
+    }
+    let tagged_value = shifted | (tagged as u64);
+    Ok(write_varint_to(w, tagged_value)?)
 }
 
 #[cfg(test)]
@@ -296,7 +309,7 @@ mod tests {
     #[test]
     fn tagged_varint_roundtrip_untagged() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 42, false);
+        write_tagged_varint(&mut buf, 42, false).unwrap();
 
         let mut slice = buf.as_slice();
         let (val, is_bytes) = read_tagged_varint(&mut slice).unwrap();
@@ -307,7 +320,7 @@ mod tests {
     #[test]
     fn tagged_varint_roundtrip_tagged() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 42, true);
+        write_tagged_varint(&mut buf, 42, true).unwrap();
 
         let mut slice = buf.as_slice();
         let (val, is_bytes) = read_tagged_varint(&mut slice).unwrap();
@@ -318,7 +331,7 @@ mod tests {
     #[test]
     fn tagged_varint_zero_untagged() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 0, false);
+        write_tagged_varint(&mut buf, 0, false).unwrap();
         assert_eq!(buf, [0x00]); // (0 << 1) | 0 = 0
 
         let mut slice = buf.as_slice();
@@ -330,7 +343,7 @@ mod tests {
     #[test]
     fn tagged_varint_zero_tagged() {
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 0, true);
+        write_tagged_varint(&mut buf, 0, true).unwrap();
         assert_eq!(buf, [0x01]); // (0 << 1) | 1 = 1
 
         let mut slice = buf.as_slice();
@@ -343,7 +356,7 @@ mod tests {
     fn tagged_varint_large_value() {
         // 32 is common (pubkey length), tagged
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, 32, true);
+        write_tagged_varint(&mut buf, 32, true).unwrap();
         // (32 << 1) | 1 = 65 = 0x41
         assert_eq!(buf, [0x41]);
 
@@ -358,7 +371,7 @@ mod tests {
         // Maximum value that can be shifted left by 1: (2^63 - 1)
         let max_safe = (1u64 << 63) - 1;
         let mut buf = Vec::new();
-        write_tagged_varint(&mut buf, max_safe, true);
+        write_tagged_varint(&mut buf, max_safe, true).unwrap();
 
         let mut slice = buf.as_slice();
         let (val, is_bytes) = read_tagged_varint(&mut slice).unwrap();
@@ -367,15 +380,15 @@ mod tests {
     }
 
     #[test]
-    fn tagged_varint_high_bit_set_wraps() {
-        // Note: checked_shl(1) doesn't detect bit loss, only invalid shift amounts.
-        // Values with the high bit set will wrap when shifted, but won't panic.
-        // This test documents the current behavior.
+    fn tagged_varint_overflow_returns_error() {
+        // Values >= 2^63 should return an error, not panic or wrap
         let mut buf = Vec::new();
-        // This will silently overflow/wrap, producing (0 | tagged_bit)
-        write_tagged_varint(&mut buf, 1u64 << 63, false);
-        // The result is 0 because (2^63 << 1) overflows to 0
-        assert_eq!(buf, [0x00]);
+        let result = write_tagged_varint(&mut buf, 1u64 << 63, false);
+        assert!(matches!(result, Err(Error::TaggedVarintOverflow)));
+
+        // u64::MAX should also error
+        let result = write_tagged_varint(&mut buf, u64::MAX, true);
+        assert!(matches!(result, Err(Error::TaggedVarintOverflow)));
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -401,7 +414,7 @@ mod tests {
         for val in [0, 1, 32, 64, 1000] {
             for tagged in [false, true] {
                 let mut buf = Vec::new();
-                write_tagged_varint(&mut buf, val, tagged);
+                write_tagged_varint(&mut buf, val, tagged).unwrap();
 
                 let mut writer_buf = Vec::new();
                 let written = write_tagged_varint_to(&mut writer_buf, val, tagged).unwrap();
@@ -410,6 +423,13 @@ mod tests {
                 assert_eq!(written, buf.len());
             }
         }
+    }
+
+    #[test]
+    fn write_tagged_varint_to_overflow_returns_error() {
+        let mut buf = Vec::new();
+        let result = write_tagged_varint_to(&mut buf, 1u64 << 63, false);
+        assert!(matches!(result, Err(Error::TaggedVarintOverflow)));
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

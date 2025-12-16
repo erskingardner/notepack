@@ -215,6 +215,18 @@ notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAERERERERERERERERERERERERERE
 
 ---
 
+## 10. Size limits
+
+To prevent denial-of-service attacks from maliciously crafted payloads, decoders SHOULD enforce reasonable size limits:
+
+* **Maximum allocation size:** 128 KB (131,072 bytes) is recommended for any single allocation (content, tag element, etc.).
+* **Maximum tag count:** Implementations MAY limit the number of tags to prevent excessive memory usage.
+* **Maximum tag element count:** Implementations MAY limit elements per tag similarly.
+
+Encoders are not required to enforce these limits, but decoders should reject payloads that exceed them.
+
+---
+
 ## 11. Pseudocode
 
 ### 11.1 Varint (ULEB128)
