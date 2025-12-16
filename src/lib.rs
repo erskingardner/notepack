@@ -86,7 +86,7 @@ mod stringtype;
 mod varint;
 
 pub use error::Error;
-pub use note::{Note, NoteBuf, TagElems, Tags};
+pub use note::{Note, NoteBinary, NoteBuf, TagElems, Tags};
 pub use parser::{MAX_ALLOCATION_SIZE, NoteParser, ParsedField, ParserState, SUPPORTED_VERSION};
 pub use stringtype::StringType;
 

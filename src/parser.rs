@@ -383,6 +383,278 @@ impl<'a> NoteParser<'a> {
     pub fn current_state(&self) -> ParserState {
         self.state
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Zero-copy field accessors for fast filtering
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// Read just the event ID without full deserialization.
+    ///
+    /// This is O(1) - the ID is at a fixed offset (byte 1) in the notepack format.
+    /// Useful for filtering events by ID without parsing tags/content.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnsupportedVersion`] if the version is not 1.
+    /// - [`Error::Truncated`] if the data is too short.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
+    /// let parser = NoteParser::new(&bytes);
+    ///
+    /// let id = parser.read_id().unwrap();
+    /// assert_eq!(id, &[0x00; 32]);
+    /// ```
+    #[inline]
+    pub fn read_id(&self) -> Result<&'a [u8; 32], Error> {
+        // Minimum size: version(1) + id(32) = 33 bytes
+        if self.data.len() < 33 {
+            return Err(Error::Truncated);
+        }
+
+        // Verify version
+        if self.data[0] != SUPPORTED_VERSION {
+            return Err(Error::UnsupportedVersion(self.data[0] as u64));
+        }
+
+        // ID is at fixed offset 1, length 32
+        self.data[1..33]
+            .try_into()
+            .map_err(|_| Error::Truncated)
+    }
+
+    /// Read just the public key without full deserialization.
+    ///
+    /// This is O(1) - the pubkey is at a fixed offset (byte 33) in the notepack format.
+    /// Useful for filtering events by author without parsing tags/content.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnsupportedVersion`] if the version is not 1.
+    /// - [`Error::Truncated`] if the data is too short.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
+    /// let parser = NoteParser::new(&bytes);
+    ///
+    /// let pubkey = parser.read_pubkey().unwrap();
+    /// assert_eq!(pubkey, &[0x11; 32]);
+    /// ```
+    #[inline]
+    pub fn read_pubkey(&self) -> Result<&'a [u8; 32], Error> {
+        // Minimum size: version(1) + id(32) + pubkey(32) = 65 bytes
+        if self.data.len() < 65 {
+            return Err(Error::Truncated);
+        }
+
+        // Verify version
+        if self.data[0] != SUPPORTED_VERSION {
+            return Err(Error::UnsupportedVersion(self.data[0] as u64));
+        }
+
+        // Pubkey is at fixed offset 33, length 32
+        self.data[33..65]
+            .try_into()
+            .map_err(|_| Error::Truncated)
+    }
+
+    /// Read just the signature without full deserialization.
+    ///
+    /// This is O(1) - the sig is at a fixed offset (byte 65) in the notepack format.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnsupportedVersion`] if the version is not 1.
+    /// - [`Error::Truncated`] if the data is too short.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
+    /// let parser = NoteParser::new(&bytes);
+    ///
+    /// let sig = parser.read_sig().unwrap();
+    /// assert_eq!(sig, &[0x22; 64]);
+    /// ```
+    #[inline]
+    pub fn read_sig(&self) -> Result<&'a [u8; 64], Error> {
+        // Minimum size: version(1) + id(32) + pubkey(32) + sig(64) = 129 bytes
+        if self.data.len() < 129 {
+            return Err(Error::Truncated);
+        }
+
+        // Verify version
+        if self.data[0] != SUPPORTED_VERSION {
+            return Err(Error::UnsupportedVersion(self.data[0] as u64));
+        }
+
+        // Sig is at fixed offset 65, length 64
+        self.data[65..129]
+            .try_into()
+            .map_err(|_| Error::Truncated)
+    }
+
+    /// Read just the created_at timestamp without full deserialization.
+    ///
+    /// This requires parsing the varint at offset 129, but skips all tag/content parsing.
+    /// Useful for time-range filtering.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnsupportedVersion`] if the version is not 1.
+    /// - [`Error::Truncated`] if the data is too short.
+    /// - [`Error::VarintUnterminated`] or [`Error::VarintOverflow`] if the varint is malformed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
+    /// let parser = NoteParser::new(&bytes);
+    ///
+    /// let created_at = parser.read_created_at().unwrap();
+    /// assert_eq!(created_at, 1720000000);
+    /// ```
+    #[inline]
+    pub fn read_created_at(&self) -> Result<u64, Error> {
+        // Minimum size: version(1) + id(32) + pubkey(32) + sig(64) + created_at(1) = 130 bytes
+        if self.data.len() < 130 {
+            return Err(Error::Truncated);
+        }
+
+        // Verify version
+        if self.data[0] != SUPPORTED_VERSION {
+            return Err(Error::UnsupportedVersion(self.data[0] as u64));
+        }
+
+        // created_at varint starts at offset 129
+        let mut slice = &self.data[129..];
+        read_varint(&mut slice)
+    }
+
+    /// Read just the event kind without full deserialization.
+    ///
+    /// This requires parsing two varints (created_at and kind) but skips all
+    /// tag/content parsing. Useful for filtering by event type.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnsupportedVersion`] if the version is not 1.
+    /// - [`Error::Truncated`] if the data is too short.
+    /// - [`Error::VarintUnterminated`] or [`Error::VarintOverflow`] if a varint is malformed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
+    /// let parser = NoteParser::new(&bytes);
+    ///
+    /// let kind = parser.read_kind().unwrap();
+    /// assert_eq!(kind, 0);
+    /// ```
+    #[inline]
+    pub fn read_kind(&self) -> Result<u64, Error> {
+        // Minimum size: version(1) + id(32) + pubkey(32) + sig(64) + created_at(1) + kind(1) = 131
+        if self.data.len() < 131 {
+            return Err(Error::Truncated);
+        }
+
+        // Verify version
+        if self.data[0] != SUPPORTED_VERSION {
+            return Err(Error::UnsupportedVersion(self.data[0] as u64));
+        }
+
+        // Skip created_at varint, then read kind varint
+        let mut slice = &self.data[129..];
+        let _created_at = read_varint(&mut slice)?;
+        read_varint(&mut slice)
+    }
+
+    /// Read kind and pubkey together in a single pass.
+    ///
+    /// This is the common filter pattern for Nostr queries: filter by event type
+    /// and author. Returns `(kind, pubkey)`.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnsupportedVersion`] if the version is not 1.
+    /// - [`Error::Truncated`] if the data is too short.
+    /// - [`Error::VarintUnterminated`] or [`Error::VarintOverflow`] if a varint is malformed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
+    /// let parser = NoteParser::new(&bytes);
+    ///
+    /// let (kind, pubkey) = parser.read_kind_and_pubkey().unwrap();
+    /// assert_eq!(kind, 0);
+    /// assert_eq!(pubkey, &[0x11; 32]);
+    /// ```
+    #[inline]
+    pub fn read_kind_and_pubkey(&self) -> Result<(u64, &'a [u8; 32]), Error> {
+        // Get pubkey first (O(1))
+        let pubkey = self.read_pubkey()?;
+        // Then get kind (requires parsing created_at varint)
+        let kind = self.read_kind()?;
+        Ok((kind, pubkey))
+    }
+
+    /// Read created_at and kind together in a single pass.
+    ///
+    /// Useful for time-range + event-type filtering.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnsupportedVersion`] if the version is not 1.
+    /// - [`Error::Truncated`] if the data is too short.
+    /// - [`Error::VarintUnterminated`] or [`Error::VarintOverflow`] if a varint is malformed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use notepack::NoteParser;
+    ///
+    /// let bytes = NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAgMCZUGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi53c3M6Ly9yZWxheS5leGFtcGxlLmNvbQICcEG7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uw").unwrap();
+    /// let parser = NoteParser::new(&bytes);
+    ///
+    /// let (created_at, kind) = parser.read_created_at_and_kind().unwrap();
+    /// assert_eq!(created_at, 1720000000);
+    /// assert_eq!(kind, 0);
+    /// ```
+    #[inline]
+    pub fn read_created_at_and_kind(&self) -> Result<(u64, u64), Error> {
+        // Minimum size check
+        if self.data.len() < 131 {
+            return Err(Error::Truncated);
+        }
+
+        // Verify version
+        if self.data[0] != SUPPORTED_VERSION {
+            return Err(Error::UnsupportedVersion(self.data[0] as u64));
+        }
+
+        // Parse both varints in sequence
+        let mut slice = &self.data[129..];
+        let created_at = read_varint(&mut slice)?;
+        let kind = read_varint(&mut slice)?;
+        Ok((created_at, kind))
+    }
 }
 
 /// Base64 decode using the RFC 4648 alphabet **without padding** (`=`).
@@ -1261,5 +1533,323 @@ mod read_string_tests {
         let mut slice = buf.as_slice();
         let result = read_string(&mut slice);
         assert!(matches!(result, Err(Error::Utf8(_))));
+    }
+}
+
+#[cfg(test)]
+mod field_accessor_tests {
+    use super::*;
+    use crate::varint::write_varint;
+
+    fn build_test_note(created_at: u64, kind: u64) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0xaa; 32]); // id
+        buf.extend_from_slice(&[0xbb; 32]); // pubkey
+        buf.extend_from_slice(&[0xcc; 64]); // sig
+        write_varint(&mut buf, created_at);
+        write_varint(&mut buf, kind);
+        write_varint(&mut buf, 5); // content len
+        buf.extend_from_slice(b"hello"); // content
+        write_varint(&mut buf, 0); // num_tags
+        buf
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // read_id tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_id_returns_correct_bytes() {
+        let bytes = build_test_note(1720000000, 1);
+        let parser = NoteParser::new(&bytes);
+
+        let id = parser.read_id().unwrap();
+        assert_eq!(id, &[0xaa; 32]);
+    }
+
+    #[test]
+    fn read_id_truncated_returns_error() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0xaa; 16]); // only 16 bytes of id
+
+        let parser = NoteParser::new(&buf);
+        let result = parser.read_id();
+        assert!(matches!(result, Err(Error::Truncated)));
+    }
+
+    #[test]
+    fn read_id_wrong_version_returns_error() {
+        let mut buf = Vec::new();
+        buf.push(2); // wrong version
+        buf.extend_from_slice(&[0xaa; 32]); // id
+
+        let parser = NoteParser::new(&buf);
+        let result = parser.read_id();
+        assert!(matches!(result, Err(Error::UnsupportedVersion(2))));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // read_pubkey tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_pubkey_returns_correct_bytes() {
+        let bytes = build_test_note(1720000000, 1);
+        let parser = NoteParser::new(&bytes);
+
+        let pubkey = parser.read_pubkey().unwrap();
+        assert_eq!(pubkey, &[0xbb; 32]);
+    }
+
+    #[test]
+    fn read_pubkey_truncated_returns_error() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0xaa; 32]); // id
+        buf.extend_from_slice(&[0xbb; 16]); // only 16 bytes of pubkey
+
+        let parser = NoteParser::new(&buf);
+        let result = parser.read_pubkey();
+        assert!(matches!(result, Err(Error::Truncated)));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // read_sig tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_sig_returns_correct_bytes() {
+        let bytes = build_test_note(1720000000, 1);
+        let parser = NoteParser::new(&bytes);
+
+        let sig = parser.read_sig().unwrap();
+        assert_eq!(sig, &[0xcc; 64]);
+    }
+
+    #[test]
+    fn read_sig_truncated_returns_error() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0xaa; 32]); // id
+        buf.extend_from_slice(&[0xbb; 32]); // pubkey
+        buf.extend_from_slice(&[0xcc; 32]); // only 32 bytes of sig
+
+        let parser = NoteParser::new(&buf);
+        let result = parser.read_sig();
+        assert!(matches!(result, Err(Error::Truncated)));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // read_created_at tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_created_at_small_value() {
+        let bytes = build_test_note(123, 1);
+        let parser = NoteParser::new(&bytes);
+
+        let created_at = parser.read_created_at().unwrap();
+        assert_eq!(created_at, 123);
+    }
+
+    #[test]
+    fn read_created_at_large_value() {
+        let bytes = build_test_note(1720000000, 1);
+        let parser = NoteParser::new(&bytes);
+
+        let created_at = parser.read_created_at().unwrap();
+        assert_eq!(created_at, 1720000000);
+    }
+
+    #[test]
+    fn read_created_at_max_value() {
+        let bytes = build_test_note(u64::MAX, 1);
+        let parser = NoteParser::new(&bytes);
+
+        let created_at = parser.read_created_at().unwrap();
+        assert_eq!(created_at, u64::MAX);
+    }
+
+    #[test]
+    fn read_created_at_truncated_returns_error() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0xaa; 32]); // id
+        buf.extend_from_slice(&[0xbb; 32]); // pubkey
+        buf.extend_from_slice(&[0xcc; 64]); // sig
+        // no created_at
+
+        let parser = NoteParser::new(&buf);
+        let result = parser.read_created_at();
+        assert!(matches!(result, Err(Error::Truncated)));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // read_kind tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_kind_small_value() {
+        let bytes = build_test_note(1720000000, 1);
+        let parser = NoteParser::new(&bytes);
+
+        let kind = parser.read_kind().unwrap();
+        assert_eq!(kind, 1);
+    }
+
+    #[test]
+    fn read_kind_large_value() {
+        let bytes = build_test_note(1720000000, 30023);
+        let parser = NoteParser::new(&bytes);
+
+        let kind = parser.read_kind().unwrap();
+        assert_eq!(kind, 30023);
+    }
+
+    #[test]
+    fn read_kind_max_value() {
+        let bytes = build_test_note(0, u64::MAX);
+        let parser = NoteParser::new(&bytes);
+
+        let kind = parser.read_kind().unwrap();
+        assert_eq!(kind, u64::MAX);
+    }
+
+    #[test]
+    fn read_kind_truncated_returns_error() {
+        let mut buf = Vec::new();
+        write_varint(&mut buf, 1); // version
+        buf.extend_from_slice(&[0xaa; 32]); // id
+        buf.extend_from_slice(&[0xbb; 32]); // pubkey
+        buf.extend_from_slice(&[0xcc; 64]); // sig
+        write_varint(&mut buf, 1720000000); // created_at
+        // no kind
+
+        let parser = NoteParser::new(&buf);
+        let result = parser.read_kind();
+        assert!(matches!(result, Err(Error::VarintUnterminated)));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // read_kind_and_pubkey tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_kind_and_pubkey_returns_both() {
+        let bytes = build_test_note(1720000000, 7);
+        let parser = NoteParser::new(&bytes);
+
+        let (kind, pubkey) = parser.read_kind_and_pubkey().unwrap();
+        assert_eq!(kind, 7);
+        assert_eq!(pubkey, &[0xbb; 32]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // read_created_at_and_kind tests
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_created_at_and_kind_returns_both() {
+        let bytes = build_test_note(1720000000, 30023);
+        let parser = NoteParser::new(&bytes);
+
+        let (created_at, kind) = parser.read_created_at_and_kind().unwrap();
+        assert_eq!(created_at, 1720000000);
+        assert_eq!(kind, 30023);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Field accessors don't modify parser state
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn field_accessors_dont_modify_state() {
+        let bytes = build_test_note(1720000000, 1);
+        let parser = NoteParser::new(&bytes);
+
+        // Call all accessors
+        let _ = parser.read_id();
+        let _ = parser.read_pubkey();
+        let _ = parser.read_sig();
+        let _ = parser.read_created_at();
+        let _ = parser.read_kind();
+        let _ = parser.read_kind_and_pubkey();
+        let _ = parser.read_created_at_and_kind();
+
+        // Parser state should still be Start
+        assert_eq!(parser.current_state(), ParserState::Start);
+
+        // Full parsing should still work
+        let note = parser.into_note().unwrap();
+        assert_eq!(note.kind, 1);
+        assert_eq!(note.created_at, 1720000000);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Real-world filtering scenario
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn filter_by_kind_and_pubkey() {
+        // Simulate filtering a batch of events
+        let target_pubkey = [0xbb; 32];
+        let target_kind = 1u64;
+
+        let events = vec![
+            build_test_note(1720000000, 1),  // matches
+            build_test_note(1720000001, 7),  // wrong kind
+            build_test_note(1720000002, 1),  // matches
+        ];
+
+        // Change pubkey in event 1
+        let mut event1 = events[1].clone();
+        event1[33..65].copy_from_slice(&[0xdd; 32]); // different pubkey
+
+        let events = vec![events[0].clone(), event1, events[2].clone()];
+
+        let mut matches = Vec::new();
+        for event_bytes in &events {
+            let parser = NoteParser::new(event_bytes);
+
+            // Fast field access without full deserialization
+            let (kind, pubkey) = parser.read_kind_and_pubkey().unwrap();
+
+            if kind == target_kind && pubkey == &target_pubkey {
+                // Only deserialize matching events
+                let note = parser.into_note().unwrap();
+                matches.push(note.created_at);
+            }
+        }
+
+        assert_eq!(matches, vec![1720000000, 1720000002]);
+    }
+
+    #[test]
+    fn filter_by_time_range() {
+        let events = vec![
+            build_test_note(1719000000, 1),  // before range
+            build_test_note(1720000000, 1),  // in range
+            build_test_note(1720500000, 1),  // in range
+            build_test_note(1721000001, 1),  // after range
+        ];
+
+        let since = 1720000000u64;
+        let until = 1721000000u64;
+
+        let mut matches = Vec::new();
+        for event_bytes in &events {
+            let parser = NoteParser::new(event_bytes);
+
+            // Fast time check
+            let created_at = parser.read_created_at().unwrap();
+
+            if created_at >= since && created_at <= until {
+                matches.push(created_at);
+            }
+        }
+
+        assert_eq!(matches, vec![1720000000, 1720500000]);
     }
 }
