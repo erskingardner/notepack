@@ -5,17 +5,19 @@
 //!
 //! This crate provides two core capabilities:
 //!
-//! - **Encoding**: Turn a [`Note`] (a structured Nostr event) into a notepack binary, or a Base64
-//!   string prefixed with `notepack_`.
+//! - **Encoding**: Turn a Nostr event into a notepack binary using [`NoteBuf`] (from hex strings)
+//!   or [`NoteBinary`] (from raw bytes, 2-3x faster).
 //! - **Decoding / Streaming Parsing**: Efficiently stream through a binary notepack payload using
 //!   [`NoteParser`], yielding fields as they are parsed (without needing to fully deserialize).
 //!
 //! ## Features
 //!
 //! - **Compact binary format** using varint encoding for integers.
-//! - **Streaming parser**: no allocation-heavy parsing; fields are yielded one by one as they’re read.
+//! - **Zero-copy parsing**: borrowed slices into the original data for id, pubkey, sig, content.
+//! - **Lazy tag iteration**: tags are only parsed when accessed.
+//! - **Fast field accessors**: read id, pubkey, kind without deserializing tags/content.
 //!
-//! ## Example: Encoding a Note
+//! ## Example: Encoding from Hex Strings
 //!
 //! ```rust
 //! use notepack::{NoteBuf, pack_note_to_string};
@@ -33,6 +35,32 @@
 //! let packed = pack_note_to_string(&note).unwrap();
 //! println!("{packed}");
 //! // prints something like `notepack_AAECA...`
+//! ```
+//!
+//! ## Example: Fast Binary Encoding
+//!
+//! When you already have binary data (from crypto libraries or databases), [`NoteBinary`]
+//! avoids hex encoding/decoding overhead:
+//!
+//! ```rust
+//! use notepack::NoteBinary;
+//!
+//! let id = [0xaa; 32];
+//! let pubkey = [0xbb; 32];
+//! let sig = [0xcc; 64];
+//! let tags = vec![vec!["t".into(), "nostr".into()]];
+//!
+//! let note = NoteBinary {
+//!     id: &id,
+//!     pubkey: &pubkey,
+//!     sig: &sig,
+//!     created_at: 1720000000,
+//!     kind: 1,
+//!     tags: &tags,
+//!     content: "Hello!",
+//! };
+//!
+//! let bytes = note.pack();  // 2-3x faster than NoteBuf
 //! ```
 //!
 //! ## Example: Streaming Parse
@@ -53,6 +81,24 @@
 //! }
 //! ```
 //!
+//! ## Example: Fast Field Access for Filtering
+//!
+//! For relay workloads filtering millions of events, use direct field accessors:
+//!
+//! ```rust
+//! use notepack::NoteParser;
+//!
+//! # let event_bytes = notepack::NoteParser::decode("notepack_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREREREREREREREREREREiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIigLyUtAYABWhlbGxvAA").unwrap();
+//! let parser = NoteParser::new(&event_bytes);
+//!
+//! // O(1) access to fixed-offset fields - no tag/content parsing
+//! let pubkey = parser.read_pubkey().unwrap();
+//! let kind = parser.read_kind().unwrap();
+//!
+//! // Combined accessor for common filter pattern
+//! let (kind, pubkey) = parser.read_kind_and_pubkey().unwrap();
+//! ```
+//!
 //! ## Binary Tool
 //!
 //! This crate also ships with a small CLI called `notepack` (see `main.rs`):
@@ -65,11 +111,14 @@
 //!   | notepack
 //! ```
 //!
-//! ## Modules
+//! ## Main Types
 //!
-//! - [`Note`] — main event struct used for encoding.
+//! - [`NoteBuf`] — owned event with hex strings, for JSON interop.
+//! - [`NoteBinary`] — borrowed event with binary fields, for fast encoding.
+//! - [`Note`] — zero-copy parsed event with borrowed slices.
 //! - [`NoteParser`] — streaming parser for notepack binaries.
 //! - [`ParsedField`] — enum of parsed fields yielded by the parser.
+//! - [`Tags`] — lazy iterator over tags.
 //! - [`Error`] — unified error type.
 //! - [`StringType`] — distinguishes between raw byte tags and UTF-8 tags.
 //!

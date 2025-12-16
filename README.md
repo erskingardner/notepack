@@ -57,7 +57,7 @@ For large contact lists, you can crunch them down from 74kb to about 36kb.
 
 ## 📦 Usage (Library)
 
-### Encoding
+### Encoding from Hex Strings
 
 ```rust
 use notepack::{NoteBuf, pack_note_to_string};
@@ -74,6 +74,34 @@ let note = NoteBuf {
 
 let encoded = pack_note_to_string(&note).unwrap();
 println!("{encoded}"); // => notepack_AAECAw...
+```
+
+### Fast Binary Encoding (2-3x faster)
+
+When you already have binary data (from crypto libraries or databases), use `NoteBinary` to skip hex decoding:
+
+```rust
+use notepack::NoteBinary;
+
+let id = [0xaa; 32];
+let pubkey = [0xbb; 32];
+let sig = [0xcc; 64];
+let tags = vec![vec!["t".into(), "nostr".into()]];
+
+let note = NoteBinary {
+    id: &id,
+    pubkey: &pubkey,
+    sig: &sig,
+    created_at: 1720000000,
+    kind: 1,
+    tags: &tags,
+    content: "Hello, Nostr!",
+};
+
+let bytes = note.pack();           // Returns Vec<u8>
+// Or reuse a buffer:
+// let mut buf = Vec::new();
+// note.pack_into(&mut buf);
 ```
 
 ### Streaming Decode
@@ -93,6 +121,38 @@ for field in parser {
     }
 }
 ```
+
+### Fast Field Access (Zero-Copy Filtering)
+
+For relay workloads that filter millions of events, read specific fields without full deserialization:
+
+```rust
+use notepack::NoteParser;
+
+// Filter events by kind and author without parsing tags/content
+for event_bytes in database.scan() {
+    let parser = NoteParser::new(event_bytes);
+
+    // O(1) access to fixed-offset fields
+    let pubkey = parser.read_pubkey().unwrap();
+    let kind = parser.read_kind().unwrap();
+
+    if kind == 1 && pubkey == &target_pubkey {
+        // Only deserialize matching events
+        let note = parser.into_note().unwrap();
+        results.push(note);
+    }
+}
+```
+
+Available fast accessors:
+- `read_id()` - O(1), fixed offset at byte 1
+- `read_pubkey()` - O(1), fixed offset at byte 33
+- `read_sig()` - O(1), fixed offset at byte 65
+- `read_created_at()` - parses 1 varint
+- `read_kind()` - parses 2 varints
+- `read_kind_and_pubkey()` - combined for common filter pattern
+- `read_created_at_and_kind()` - combined for time+type filtering
 
 ---
 

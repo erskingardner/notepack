@@ -2,6 +2,7 @@ use crate::error::Error;
 use crate::stringtype::StringType;
 use crate::varint::{read_tagged_varint, read_varint};
 use crate::{Note, Tags};
+use simdutf8::compat::from_utf8;
 
 /// Maximum allocation size (256 KB) to prevent OOM from malicious payloads.
 pub const MAX_ALLOCATION_SIZE: u64 = 256 * 1024;
@@ -221,7 +222,7 @@ impl<'a> NoteParser<'a> {
             });
         }
         let content_bytes = read_bytes(content_len, &mut self.data)?;
-        let content = std::str::from_utf8(content_bytes)?;
+        let content = from_utf8(content_bytes)?;
 
         // tags: create a lazy cursor positioned at the tags block
         let mut tags_cursor = self.data;
@@ -290,7 +291,7 @@ impl<'a> NoteParser<'a> {
             });
         }
         let content_bytes = read_bytes(content_len, &mut self.data)?;
-        let content = std::str::from_utf8(content_bytes)?;
+        let content = from_utf8(content_bytes)?;
 
         // Parse tags: Tags::parse reads num_tags and positions itself at the first tag's data.
         // We then iterate using self.data (which shares the same position) to verify completeness,
@@ -726,7 +727,7 @@ impl<'a> Iterator for NoteParser<'a> {
             AfterKind => {
                 let content_len = read_or_err!(read_varint(&mut self.data));
                 let bytes = read_or_err!(read_bytes(content_len, &mut self.data));
-                let s = read_or_err!(std::str::from_utf8(bytes).map_err(Error::Utf8));
+                let s = read_or_err!(from_utf8(bytes).map_err(Error::from));
                 self.state = AfterContent;
                 Ok(ParsedField::Content(s))
             }
@@ -793,7 +794,7 @@ pub(crate) fn read_string<'a>(input: &mut &'a [u8]) -> Result<StringType<'a>, Er
     Ok(if is_bytes {
         StringType::Bytes(head)
     } else {
-        StringType::Str(std::str::from_utf8(head)?)
+        StringType::Str(from_utf8(head)?)
     })
 }
 

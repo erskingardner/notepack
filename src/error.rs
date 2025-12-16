@@ -162,6 +162,27 @@ impl From<std::str::Utf8Error> for Error {
     }
 }
 
+impl From<simdutf8::compat::Utf8Error> for Error {
+    #[allow(invalid_from_utf8)] // Intentional: we need to create a std::str::Utf8Error
+    fn from(err: simdutf8::compat::Utf8Error) -> Self {
+        // simdutf8::compat::Utf8Error provides the same info but is a different type.
+        // We create a synthetic std error by validating a known-bad slice.
+        // This preserves API compatibility with Error::Utf8(std::str::Utf8Error).
+        let valid_up_to = err.valid_up_to();
+        let error_len = err.error_len();
+
+        // Create a minimal invalid UTF-8 sequence to get a std::str::Utf8Error.
+        // We can't construct std::str::Utf8Error directly, so we validate a known-bad byte.
+        let invalid: &[u8] = &[0xFF];
+        let std_err = std::str::from_utf8(invalid).unwrap_err();
+
+        // Note: The position info from std_err won't match the original, but the error
+        // type is preserved. For detailed debugging, users should inspect the raw bytes.
+        let _ = (valid_up_to, error_len); // suppress unused warnings - info is lost but type matches
+        Error::Utf8(std_err)
+    }
+}
+
 impl From<base64::DecodeError> for Error {
     fn from(err: base64::DecodeError) -> Self {
         Error::Decode(err)
